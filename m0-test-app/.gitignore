@@ -1,0 +1,7 @@
+.gradle/
+build/
+app/build/
+local.properties
+# Filled in by prepare.sh from the engine build output.
+app/src/main/jniLibs/
+app/src/main/assets/
