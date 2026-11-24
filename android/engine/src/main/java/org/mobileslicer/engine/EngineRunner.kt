@@ -38,6 +38,8 @@ data class SliceResult(
     val printTimeSeconds: Long?,
     val filamentMm3: Long?,
     val sliceMillis: Long,
+    /** Toolpath extent and any unsafe nozzle temperatures found after slicing. */
+    val check: GcodeCheck,
 ) {
     /** Filament length in metres for a given filament diameter. */
     fun filamentMeters(diameterMm: Float): Double? =
@@ -133,7 +135,12 @@ class EngineRunner(private val context: Context) {
         val layers = output.bufferedReader().useLines { lines ->
             lines.take(50).firstOrNull { it.startsWith(";LAYER_COUNT:") }?.substringAfter(':')?.trim()?.toIntOrNull()
         }
-        SliceResult(output, layers, printTime, filament, SystemClock.elapsedRealtime() - start)
+        val diameter = profile.float("material_diameter") ?: 1.75f
+        val meters = filament?.let { it / (PI * (diameter / 2.0) * (diameter / 2.0)) / 1000.0 }
+        // Anything more than 30 degrees below the print temperature mid-print is a mistake.
+        val minSafe = (profile.float("material_print_temperature") ?: 200f) - 30.0
+        val check = GcodePostProcessor.process(output, printTime, meters, minSafe)
+        SliceResult(output, layers, printTime, filament, SystemClock.elapsedRealtime() - start, check)
     }
 
     /** Copies Cura's setting definitions out of the APK once per installed version. */

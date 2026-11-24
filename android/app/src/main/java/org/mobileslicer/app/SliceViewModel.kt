@@ -37,6 +37,8 @@ data class UiState(
     /** Set while a model is being read: file name, bytes read, total bytes if known. */
     val importing: Triple<String, Long, Long?>? = null,
     val scalePercent: String = "100",
+    /** Height on the bed in mm, kept in step with the scale; either can be edited. */
+    val heightMm: String = "",
     val upright: Boolean = false,
     val slice: SliceState = SliceState.Idle,
     val message: String? = null,
@@ -92,7 +94,10 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
-                _state.update { it.copy(model = LoadedModel(name, info), importing = null, scalePercent = "100") }
+                _state.update {
+                    val s = it.copy(model = LoadedModel(name, info), importing = null, scalePercent = "100")
+                    s.copy(heightMm = heightText(s))
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -101,9 +106,35 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setScalePercent(text: String) = _state.update { it.copy(scalePercent = text, slice = SliceState.Idle) }
+    fun setScalePercent(text: String) = _state.update {
+        val s = it.copy(scalePercent = text, slice = SliceState.Idle)
+        if (scale(s) != null) s.copy(heightMm = heightText(s)) else s
+    }
 
-    fun setUpright(upright: Boolean) = _state.update { it.copy(upright = upright, slice = SliceState.Idle) }
+    /** Sets the scale so the model is [text] millimetres tall on the bed. */
+    fun setHeightMm(text: String) = _state.update {
+        val target = text.replace(',', '.').toFloatOrNull()
+        val raw = unscaledHeight(it)
+        val s = it.copy(heightMm = text, slice = SliceState.Idle)
+        if (target != null && target > 0f && raw != null && raw > 0f) {
+            s.copy(scalePercent = String.format(java.util.Locale.ROOT, "%.2f", target / raw * 100f))
+        } else s
+    }
+
+    fun setUpright(upright: Boolean) = _state.update {
+        val s = it.copy(upright = upright, slice = SliceState.Idle)
+        s.copy(heightMm = heightText(s))
+    }
+
+    /** Model height in mm at 100% scale with the current orientation. */
+    private fun unscaledHeight(s: UiState): Float? =
+        s.model?.let { Placement(1f, s.upright).placedSize(it.info.bounds).third }
+
+    private fun heightText(s: UiState): String {
+        val h = unscaledHeight(s) ?: return ""
+        val sc = scale(s) ?: return s.heightMm
+        return String.format(java.util.Locale.ROOT, "%.1f", h * sc)
+    }
 
     /** Scale so the model fills at most 90% of the build volume in its tightest direction. */
     fun fitToBed() {

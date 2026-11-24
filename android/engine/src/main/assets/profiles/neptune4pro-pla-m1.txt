@@ -52,6 +52,10 @@ material_initial_print_temperature=210
 material_final_print_temperature=210
 material_bed_temperature=60
 material_bed_temperature_layer_0=60
+# Lowest nozzle temperature when slowing down for minimum layer time. Cura sets
+# it to the print temperature; the definitions' fallback is 0 C, which turned
+# the nozzle off on small models.
+cool_min_temperature=210
 
 # Speeds (mm/s)
 speed_print=100

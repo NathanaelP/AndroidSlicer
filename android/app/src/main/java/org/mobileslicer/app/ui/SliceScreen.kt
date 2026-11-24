@@ -142,6 +142,14 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             modifier = Modifier.width(140.dp),
         )
+        OutlinedTextField(
+            value = state.heightMm,
+            onValueChange = vm::setHeightMm,
+            label = { Text("Height mm") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.width(140.dp),
+        )
         OutlinedButton(onClick = vm::fitToBed) { Text("Fit to bed") }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -167,7 +175,7 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
             color = MaterialTheme.colorScheme.error,
         )
         maxOf(w, d, h) < 5f -> Text(
-            "Very small. The export may use different units; try Fit to bed.",
+            "Very small. Sculpting apps don't export in millimetres: enter the height you want, or use Fit to bed.",
             color = MaterialTheme.colorScheme.tertiary,
         )
         else -> Text("Fits the build volume.")
@@ -198,6 +206,19 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
         }
         is SliceState.Done -> {
             val r = s.result
+            val problems = r.check.temperatureProblems
+            if (problems.isNotEmpty()) {
+                val first = problems.first()
+                Text(
+                    "Don't print this. The G-code sets the nozzle to an unsafe temperature mid-print " +
+                        "(${first.command} on layer ${first.layer}, line ${first.line}" +
+                        (if (problems.size > 1) ", and ${problems.size - 1} more" else "") +
+                        "). This is a bug in MobileSlicer's profile, so saving is turned off. Please report it.",
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(onClick = vm::slice) { Text("Slice again") }
+                return@Section
+            }
             Text("Sliced in ${"%.1f".format(r.sliceMillis / 1000.0)} s")
             r.layers?.let { Text("Layers: $it") }
             r.printTimeSeconds?.let { Text("Estimated print time: ${duration(it)}") }
