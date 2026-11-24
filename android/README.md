@@ -53,3 +53,9 @@ To time the importer on a large file: `MOBILESLICER_LARGE_MESH=/path/to/mesh.obj
 ## Found on the first device test
 
 The first Nomad export (about 3 mm tall, since Nomad doesn't export in millimetres) produced G-code that switched the nozzle heater off on layer 0. The cause was `cool_min_temperature`: when a layer prints faster than the minimum layer time, the engine lowers the nozzle temperature towards this value. Cura's formula sets it to the print temperature, but the definitions' fallback is 0 °C. Small models have only short layers, so the nozzle was turned down towards 0. The profile now sets it, and the temperature check above catches this kind of fault if another setting causes it. Resolving settings properly is M2's job.
+
+## Device results
+
+| Date | Device | Model | Result |
+| --- | --- | --- | --- |
+| 2026-11-24 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt export ("Senhor Leite"), scaled to 28.3 mm tall | **M1 exit test passed.** Sliced end to end on the device in 2.4 s: 142 layers, 14 min 9 s, 0.69 m of filament. The G-code was checked: header filled in, safe temperatures throughout, centred on the bed, extrusion on every layer. |
