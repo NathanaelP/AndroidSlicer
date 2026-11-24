@@ -64,3 +64,9 @@ A 50 mm cube (the 20 mm test cube at 250%) passes all 21 checks with each preset
 Two things look like bugs but are correct:
 - **Infill at 62.5 mm/s:** on the layer just below the top skin, Cura 5.13 prints *skin support* at `skin_support_speed` (62.5 mm/s).
 - **Nozzle temperature change during layer 0:** the engine sends the layer-1 temperature (200 °C) near the end of layer 0, so the nozzle has cooled by the time layer 1 starts.
+
+## Device results
+
+| Date | Printer | Preset | Result |
+| --- | --- | --- | --- |
+| 2026-11-24 | Elegoo Neptune 4 Pro (by flash drive) | Normal · 0.15 mm, 20 mm calibration cube sliced on a Galaxy S25 Ultra | **M2 exit test passed.** The first layer and brim adhered evenly. The walls are clean and consistent at 250 mm/s, with sharp corners. The top surface is fully closed. The seam is aligned on one face, as the profile's "back" seam position intends. One under-filled band near the bottom matches a filament snap mid-print. |

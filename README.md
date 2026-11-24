@@ -2,7 +2,7 @@
 
 A native Android slicer built on CuraEngine. It takes a Nomad Sculpt export (STL/OBJ) to G-code on the device and sends it to a Klipper printer through Moonraker, with no PC and no flash drive. First target: Elegoo Neptune 4 Pro.
 
-**Status:** milestone M2, real printer profiles. Fine, Normal and Fast PLA presets for the Elegoo Neptune 4 Pro are built from Cura's own definitions, including Elegoo's start and end G-code. M0 (CuraEngine on Android) and M1 (a Nomad Sculpt export sliced end to end on the device) passed.
+**Status:** M0, M1 and M2 passed. CuraEngine runs on Android with output identical to the desktop build. A Nomad Sculpt export slices end to end on the device. A calibration cube sliced on the phone with the Neptune 4 Pro profile, which is built from Cura's own definitions, printed cleanly. Next: M3, a 3D viewport.
 
 ## Documentation
 
