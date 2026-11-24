@@ -25,6 +25,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -76,7 +79,7 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
                 ModelCard(state, onOpen = { openModel.launch(arrayOf("*/*")) })
                 if (state.model != null) {
                     PlacementCard(state, vm)
-                    ProfileCard()
+                    ProfileCard(state, vm)
                     SliceCard(state, vm, onSave = { saveGcode.launch(vm.suggestedGcodeName()) })
                 }
             }
@@ -168,7 +171,7 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
     }
     val (w, d, h) = vm.placement(state).placedSize(model.info.bounds)
     Text("On the bed: ${mm(w)} × ${mm(d)} × ${mm(h)} mm (width × depth × height)")
-    val v = vm.volume
+    val v = vm.volume(state)
     when {
         w > v.width || d > v.depth || h > v.height -> Text(
             "Too big for the ${mm(v.width)} × ${mm(v.depth)} × ${mm(v.height)} mm build volume. Scale it down or use Fit to bed.",
@@ -182,21 +185,55 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileCard() = Section("Profile") {
-    Text("Elegoo Neptune 4 Pro · PLA · 0.2 mm layers · 15% infill · no supports")
+private fun ProfileCard(state: UiState, vm: SliceViewModel) = Section("Profile") {
+    val p = vm.profile(state)
+    Text("${p.machine} · ${p.material}")
+    SingleChoiceSegmentedButtonRow {
+        vm.profiles.forEachIndexed { i, option ->
+            SegmentedButton(
+                selected = option.id == p.id,
+                onClick = { vm.selectProfile(option.id) },
+                shape = SegmentedButtonDefaults.itemShape(i, vm.profiles.size),
+                enabled = state.slice !is SliceState.Running,
+            ) { Text(option.name) }
+        }
+    }
+    val f = { key: String -> p.float(key) ?: 0f }
     Text(
-        "Placeholder profile for testing. Real printer profiles and Elegoo's start G-code come in a later version.",
+        "Nozzle ${deg(f("material_print_temperature"))} °C (first layer ${deg(f("material_print_temperature_layer_0"))} °C) · " +
+            "bed ${deg(f("material_bed_temperature"))} °C",
+    )
+    Text(
+        "${p["wall_line_count"]} walls · ${p["top_layers"]} top and ${p["bottom_layers"]} bottom layers · " +
+            "${deg(f("infill_sparse_density"))}% ${p["infill_pattern"]} infill · ${adhesion(p["adhesion_type"])} · " +
+            if (p["support_enable"] == "True") "supports" else "no supports",
+    )
+    Text("Print speed ${deg(f("speed_print"))} mm/s · retraction ${p["retraction_amount"]} mm at ${deg(f("retraction_retract_speed"))} mm/s")
+    Text(
+        "From Cura 5.13's Elegoo Neptune 4 Pro profile, including Elegoo's start and end G-code.",
         style = MaterialTheme.typography.bodySmall,
     )
+}
+
+private fun deg(v: Float) = if (v == v.toInt().toFloat()) v.toInt().toString() else String.format(Locale.ROOT, "%.1f", v)
+
+private fun adhesion(type: String?) = when (type) {
+    "brim" -> "brim"
+    "skirt" -> "skirt"
+    "raft" -> "raft"
+    "none" -> "no bed adhesion"
+    else -> type ?: ""
 }
 
 @Composable
 private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = Section("Slice") {
     val model = state.model ?: return@Section
     val scale = vm.scale(state)
+    val v = vm.volume(state)
     val fits = scale != null && vm.placement(state).placedSize(model.info.bounds).let { (w, d, h) ->
-        w <= vm.volume.width && d <= vm.volume.depth && h <= vm.volume.height
+        w <= v.width && d <= v.depth && h <= v.height
     }
     when (val s = state.slice) {
         is SliceState.Running -> {
@@ -213,7 +250,7 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
                     "Don't print this. The G-code sets the nozzle to an unsafe temperature mid-print " +
                         "(${first.command} on layer ${first.layer}, line ${first.line}" +
                         (if (problems.size > 1) ", and ${problems.size - 1} more" else "") +
-                        "). This is a bug in MobileSlicer's profile, so saving is turned off. Please report it.",
+                        "). This is a bug in MobileSlicer, so saving is turned off. Please report it.",
                     color = MaterialTheme.colorScheme.error,
                 )
                 OutlinedButton(onClick = vm::slice) { Text("Slice again") }
@@ -222,10 +259,11 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
             Text("Sliced in ${"%.1f".format(r.sliceMillis / 1000.0)} s")
             r.layers?.let { Text("Layers: $it") }
             r.printTimeSeconds?.let { Text("Estimated print time: ${duration(it)}") }
-            val meters = r.filamentMeters(vm.filamentDiameter)
-            val grams = r.filamentGrams()
+            val profile = vm.profile(state)
+            val meters = r.filamentMeters(vm.filamentDiameter(state))
+            val grams = r.filamentGrams(profile.materialDensity)
             if (meters != null && grams != null) {
-                Text("Filament: ${"%.2f".format(meters)} m (about ${"%.0f".format(grams)} g of PLA)")
+                Text("Filament: ${"%.2f".format(meters)} m (about ${"%.0f".format(grams)} g of ${profile.material})")
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onSave) { Text("Save G-code") }

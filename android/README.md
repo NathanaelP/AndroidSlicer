@@ -6,7 +6,7 @@ The app itself: Kotlin and Jetpack Compose, with CuraEngine running as a separat
 
 | Module | What it does |
 | --- | --- |
-| `engine` | The core, with no UI. `MeshImporter` turns STL (ASCII or binary) and OBJ into a clean binary STL. `EngineRunner` runs CuraEngine and reports progress. `Profile` loads a settings file. It also holds the engine binaries and Cura's setting definitions, which `prepare-engine.sh` copies in. |
+| `engine` | The core, with no UI. `MeshImporter` turns STL (ASCII or binary) and OBJ into a clean binary STL. `EngineRunner` runs CuraEngine and reports progress. `Profile` loads the JSON profiles built by [`profiles/build_profiles.py`](../profiles/README.md). It also holds the engine binaries and Cura's setting definitions, which `prepare-engine.sh` copies in. |
 | `app` | The Compose UI: open a model, place it, slice it, save the G-code. |
 
 ## M1 scope
@@ -14,13 +14,13 @@ The app itself: Kotlin and Jetpack Compose, with CuraEngine running as a separat
 One screen:
 
 1. **Open model:** any STL or OBJ, through Android's file picker. It's converted on import, so a Nomad Sculpt OBJ with vertex colours works. The screen shows the triangle count and the size as exported.
-2. **Placement:** scale, height in millimetres, or **Fit to bed** and **Stand upright** for models exported with Y up. The engine centres the model on the bed and drops it to the plate. The size is checked against the 225 × 225 × 265 mm build volume.
-3. **Slice:** with the built-in profile (`engine/src/main/assets/profiles/neptune4pro-pla-m1.txt`). The screen shows progress through the engine's six stages, and you can cancel.
+2. **Placement:** scale, height in millimetres, or **Fit to bed** and **Stand upright** for models exported with Y up. The engine centres the model on the bed and drops it to the plate. The size is checked against the profile's build volume (235 × 230 × 270 mm).
+3. **Slice:** with one of the Fine, Normal or Fast PLA presets (M2), built from Cura's Neptune 4 Pro profile. The screen shows progress through the engine's six stages, and you can cancel.
 4. **Save G-code:** anywhere, through the file picker. The screen shows print time, layers and filament.
 
 After slicing, `GcodePostProcessor` writes the real print time, filament length and model bounds into the G-code header (the engine leaves placeholders in command-line mode, and printer software reads them). It also checks that no nozzle temperature mid-print falls more than 30 °C below the print temperature. If one does, the app refuses to save the file.
 
-The profile is a **placeholder** until M2. Its start and end G-code are generic, not Elegoo's, so check them before printing.
+Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
 
 ## Building
 

@@ -16,4 +16,6 @@ android {
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is only a stub in local unit tests; use the real library there.
+    testImplementation("org.json:json:20250517")
 }

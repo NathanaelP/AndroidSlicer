@@ -1,27 +1,43 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package org.mobileslicer.engine
 
-import java.io.InputStream
+import org.json.JSONObject
 
-/** A flat list of CuraEngine settings, applied in order. */
-data class Profile(val name: String, val settings: List<Pair<String, String>>) {
+/**
+ * A complete, flat set of CuraEngine settings for one printer, material and
+ * quality, built offline from Cura's definitions by profiles/build_profiles.py.
+ */
+data class Profile(
+    val id: String,
+    /** Short label, e.g. "Normal · 0.15 mm". */
+    val name: String,
+    /** Cura's quality name: "Fine", "Normal" or "Fast". */
+    val quality: String,
+    val machine: String,
+    val material: String,
+    /** Filament density in g/cm³, for weight estimates. */
+    val materialDensity: Double,
+    val settings: Map<String, String>,
+) {
+    operator fun get(key: String): String? = settings[key]
 
-    operator fun get(key: String): String? = settings.lastOrNull { it.first == key }?.second
-
-    fun float(key: String): Float? = get(key)?.toFloatOrNull()
+    fun float(key: String): Float? = settings[key]?.toFloatOrNull()
 
     companion object {
-        /** Parses key=value lines; '#' starts a comment line and "\n" in a value is a line break. */
-        fun parse(name: String, input: InputStream): Profile {
-            val settings = input.bufferedReader().readLines()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
-                .map { line ->
-                    val key = line.substringBefore('=').trim()
-                    val value = line.substringAfter('=').trim().replace("\\n", "\n")
-                    key to value
-                }
-            return Profile(name, settings)
+        fun parseJson(text: String): Profile {
+            val o = JSONObject(text)
+            val s = o.getJSONObject("settings")
+            val settings = LinkedHashMap<String, String>()
+            for (key in s.keys()) settings[key] = s.getString(key)
+            return Profile(
+                id = o.getString("id"),
+                name = o.getString("name"),
+                quality = o.optString("quality", o.getString("name")),
+                machine = o.optString("machine", settings["machine_name"] ?: ""),
+                material = o.optString("material", ""),
+                materialDensity = o.optDouble("material_density", 1.24),
+                settings = settings,
+            )
         }
     }
 }
