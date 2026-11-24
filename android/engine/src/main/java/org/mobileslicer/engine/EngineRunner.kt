@@ -92,6 +92,9 @@ class EngineRunner(private val context: Context) {
             // Apply the profile to extruder 0 as well; its own defaults would win otherwise.
             add("-e0")
             addAll(settings)
+            // Cura positions models in its frontend; here the engine centres the
+            // model on the bed and drops it to the plate.
+            add("-s"); add("center_object=True")
             add("-s"); add("mesh_rotation_matrix=${placement.matrix()}")
             add("-l"); add(mesh.path)
             add("-o"); add(output.path)
@@ -167,7 +170,11 @@ class EngineRunner(private val context: Context) {
         private val PRINT_TIME = Regex("""Print time \(s\): (\d+)""")
         private val FILAMENT = Regex("""Filament \(mm\^3\): (\d+)""")
 
-        fun loadProfile(context: Context, asset: String): Profile =
-            context.assets.open("profiles/$asset").use { Profile.parse(asset.substringBeforeLast('.'), it) }
+        /** All bundled profiles, finest layers first. */
+        fun loadProfiles(context: Context): List<Profile> =
+            context.assets.list("profiles").orEmpty()
+                .filter { it.endsWith(".json") }
+                .map { name -> context.assets.open("profiles/$name").use { Profile.parseJson(it.reader().readText()) } }
+                .sortedBy { it.float("layer_height") ?: 0f }
     }
 }

@@ -40,19 +40,35 @@ url_fetch() {
 }
 
 git_fetch curaengine      "$CURAENGINE_REPO"      "$CURAENGINE_REF"
-# Only the two base setting definitions are needed from the Cura repo.
-if [ ! -d "$SRC/cura/.git" ]; then
-  echo "fetch  cura (definitions) @ $CURA_REF"
-  git init -q "$SRC/cura"
-  git -C "$SRC/cura" remote add origin "$CURA_REPO"
-  git -C "$SRC/cura" config core.sparseCheckout true
-  printf 'resources/definitions/fdmprinter.def.json\nresources/definitions/fdmextruder.def.json\n' \
-    > "$SRC/cura/.git/info/sparse-checkout"
-  git -C "$SRC/cura" fetch -q --depth 1 origin "$CURA_REF"
-  git -C "$SRC/cura" -c advice.detachedHead=false checkout -q FETCH_HEAD
-else
-  echo "have   cura (definitions)"
-fi
+# sparse_fetch <dir> <repo> <ref> <path>...: shallow checkout of only some files.
+sparse_fetch() {
+  local dir="$SRC/$1" repo="$2" ref="$3"; shift 3
+  if [ ! -d "$dir/.git" ]; then
+    echo "fetch  $(basename "$dir") (sparse) @ $ref"
+    git init -q "$dir"
+    git -C "$dir" remote add origin "$repo"
+    git -C "$dir" -c advice.detachedHead=false fetch -q --depth 1 origin "$ref"
+  else
+    echo "have   $(basename "$dir") (sparse)"
+  fi
+  # Always (re)apply the path list, so adding paths here updates old checkouts.
+  git -C "$dir" sparse-checkout set --no-cone "$@"
+  git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD 2>/dev/null \
+    || git -C "$dir" -c advice.detachedHead=false checkout -q HEAD
+}
+
+# Base setting definitions plus the Elegoo Neptune 4 / 4 Pro machine files.
+sparse_fetch cura "$CURA_REPO" "$CURA_REF" \
+  /resources/definitions/fdmprinter.def.json \
+  /resources/definitions/fdmextruder.def.json \
+  /resources/definitions/elegoo_base.def.json \
+  /resources/definitions/elegoo_neptune_4.def.json \
+  /resources/definitions/elegoo_neptune_4pro.def.json \
+  /resources/extruders/elegoo_extruder_0.def.json \
+  /resources/variants/elegoo/elegoo_neptune_4pro/ \
+  /resources/quality/elegoo/neptune_4/
+sparse_fetch fdm_materials "$FDM_MATERIALS_REPO" "$FDM_MATERIALS_REF" \
+  /generic_pla_175.xml.fdm_material /LICENSE
 git_fetch ultimaker-index "$ULTIMAKER_INDEX_REPO" "$ULTIMAKER_INDEX_REF"
 git_fetch scripta         "$SCRIPTA_REPO"         "$SCRIPTA_REF"
 git_fetch fmt             "$FMT_REPO"             "$FMT_REF"

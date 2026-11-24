@@ -11,6 +11,8 @@ Versions are pinned in [`engine/versions.env`](engine/versions.env). Sources are
 | CuraEngine | 5.13.0 | AGPL-3.0-or-later | https://github.com/Ultimaker/CuraEngine |
 | Scripta | `b96045c` | AGPL-3.0 | https://github.com/Ultimaker/Scripta_public |
 | Cura setting definitions (`fdmprinter.def.json`, `fdmextruder.def.json`) | 5.13.0 | LGPL-3.0-or-later | https://github.com/Ultimaker/Cura |
+| Printer profiles derived from Cura's Elegoo Neptune 4 / 4 Pro definition, extruder, nozzle and quality files | 5.13.0 | LGPL-3.0-or-later | https://github.com/Ultimaker/Cura |
+| Generic PLA material values (derived into the printer profiles) | fdm_materials 5.13.0 | CC0-1.0 | https://github.com/Ultimaker/fdm_materials |
 | oneTBB | 2022.2.0 | Apache-2.0 | https://github.com/uxlfoundation/oneTBB |
 | LLVM libc++ (`libc++_shared.so`, from the Android NDK r29) | r29 | Apache-2.0 WITH LLVM-exception | https://developer.android.com/ndk |
 | {fmt} | 11.1.3 | MIT | https://github.com/fmtlib/fmt |

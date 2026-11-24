@@ -40,6 +40,8 @@ data class UiState(
     /** Height on the bed in mm, kept in step with the scale; either can be edited. */
     val heightMm: String = "",
     val upright: Boolean = false,
+    /** Id of the selected profile. */
+    val profileId: String = "",
     val slice: SliceState = SliceState.Idle,
     val message: String? = null,
 )
@@ -49,15 +51,24 @@ data class BuildVolume(val width: Float, val depth: Float, val height: Float)
 
 class SliceViewModel(app: Application) : AndroidViewModel(app) {
     private val runner = EngineRunner(app)
-    val profile: Profile = EngineRunner.loadProfile(app, "neptune4pro-pla-m1.txt")
-    val volume = BuildVolume(
-        profile.float("machine_width") ?: 225f,
-        profile.float("machine_depth") ?: 225f,
-        profile.float("machine_height") ?: 265f,
-    )
-    val filamentDiameter = profile.float("material_diameter") ?: 1.75f
+    /** Bundled profiles, finest layers first. */
+    val profiles: List<Profile> = EngineRunner.loadProfiles(app)
 
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(
+        // Start on the middle preset (Normal) when there are several.
+        UiState(profileId = profiles.getOrNull(profiles.size / 2)?.id ?: "")
+    )
+
+    fun profile(s: UiState = _state.value): Profile = profiles.firstOrNull { it.id == s.profileId } ?: profiles.first()
+
+    fun volume(s: UiState = _state.value): BuildVolume = profile(s).let {
+        BuildVolume(it.float("machine_width") ?: 235f, it.float("machine_depth") ?: 230f, it.float("machine_height") ?: 270f)
+    }
+
+    fun filamentDiameter(s: UiState = _state.value): Float = profile(s).float("material_diameter") ?: 1.75f
+
+    fun selectProfile(id: String) = _state.update { it.copy(profileId = id, slice = SliceState.Idle) }
+
     val state: StateFlow<UiState> = _state
     private var sliceJob: Job? = null
 
@@ -140,6 +151,7 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
     fun fitToBed() {
         val model = _state.value.model ?: return
         val (w, d, h) = Placement(1f, _state.value.upright).placedSize(model.info.bounds)
+        val volume = volume()
         val factor = minOf(volume.width / w, volume.depth / d, volume.height / h) * 0.9f
         if (!factor.isFinite() || factor <= 0f) return
         setScalePercent("%.1f".format(java.util.Locale.ROOT, factor * 100f))
@@ -155,7 +167,7 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         sliceJob = viewModelScope.launch {
             try {
                 val out = File(workDir, "output.gcode")
-                val result = runner.slice(model.info.stl, profile, placement, out) { done ->
+                val result = runner.slice(model.info.stl, profile(s), placement, out) { done ->
                     _state.update { it.copy(slice = SliceState.Running(done, stages.size, stages.getOrNull(done))) }
                 }
                 _state.update { it.copy(slice = SliceState.Done(result)) }
