@@ -25,6 +25,9 @@ Versions are pinned in [`engine/versions.env`](engine/versions.env). Sources are
 | mapbox variant | 1.2.0 | BSD-3-Clause | https://github.com/mapbox/variant |
 | zlib | 1.3.1 | Zlib | https://github.com/madler/zlib |
 | libpng | 1.6.48 | libpng-2.0 | https://github.com/pnggroup/libpng |
+| Jetpack Compose (BOM 2026.09.00), AndroidX Activity and Lifecycle | see `android/app/build.gradle.kts` | Apache-2.0 | https://developer.android.com/jetpack/androidx |
+| kotlinx.coroutines | 1.10.2 | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
+| Kotlin standard library | 2.4.20 | Apache-2.0 | https://kotlinlang.org |
 
 ## Used only at build time
 

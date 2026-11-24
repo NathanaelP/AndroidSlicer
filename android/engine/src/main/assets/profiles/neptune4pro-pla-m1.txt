@@ -1,0 +1,88 @@
+# MobileSlicer M1 profile: Elegoo Neptune 4 Pro, PLA, 0.2 mm layers.
+# PLACEHOLDER until milestone M2, which builds real profiles (and Elegoo's own
+# start and end G-code) from Cura's definitions. Values here are reasonable
+# defaults, not Elegoo's.
+#
+# Format: key=value, one per line; "\n" in a value is a line break. Every value
+# is applied globally and to extruder 0. The engine does not derive child
+# settings from parents (that's the Cura frontend's job), so the settings that
+# matter are set directly, children included.
+
+machine_name=Elegoo Neptune 4 Pro (MobileSlicer M1 placeholder)
+machine_width=225
+machine_depth=225
+machine_height=265
+machine_center_is_zero=false
+machine_heated_bed=true
+machine_gcode_flavor=RepRap (Marlin/Sprinter)
+machine_nozzle_size=0.4
+material_diameter=1.75
+machine_start_gcode=G90\nM82\nG28 ; home\nG1 Z5 F3000\nG92 E0\nG1 X1 Y20 Z0.3 F5000 ; prime line\nG1 X1 Y200 Z0.3 F1500 E15\nG1 X1.4 Y200 Z0.3 F5000\nG1 X1.4 Y20 Z0.3 F1500 E30\nG92 E0\nG1 Z2 F3000
+machine_end_gcode=G91\nG1 E-2 F2700\nG1 Z10 F3000\nG90\nG1 X0 Y220 F3000 ; present the print\nM104 S0\nM140 S0\nM106 S0\nM84
+material_print_temp_prepend=true
+material_bed_temp_prepend=true
+
+# Place the model in the middle of the bed, resting on it.
+center_object=true
+
+# Quality
+layer_height=0.2
+layer_height_0=0.2
+line_width=0.4
+wall_line_width=0.4
+wall_line_width_0=0.4
+wall_line_width_x=0.4
+skin_line_width=0.4
+infill_line_width=0.4
+wall_line_count=3
+top_layers=5
+bottom_layers=4
+initial_bottom_layers=4
+
+# Infill: 15% grid. The engine uses the line distance, so set it to match:
+# 0.4 mm line width * 100 / 15% * 2 for grid = 5.333 mm.
+infill_sparse_density=15
+infill_pattern=grid
+infill_line_distance=5.333
+
+# Temperatures (PLA)
+material_print_temperature=210
+material_print_temperature_layer_0=215
+material_initial_print_temperature=210
+material_final_print_temperature=210
+material_bed_temperature=60
+material_bed_temperature_layer_0=60
+
+# Speeds (mm/s)
+speed_print=100
+speed_infill=120
+speed_wall=60
+speed_wall_0=60
+speed_wall_x=80
+speed_topbottom=60
+speed_roofing=60
+speed_travel=200
+speed_layer_0=30
+speed_print_layer_0=30
+speed_travel_layer_0=100
+skirt_brim_speed=30
+
+# Retraction (direct drive)
+retraction_enable=true
+retraction_amount=0.8
+retraction_speed=40
+retraction_retract_speed=40
+retraction_prime_speed=40
+
+# Cooling
+cool_fan_enabled=true
+cool_fan_speed=100
+cool_fan_speed_min=100
+cool_fan_speed_max=100
+cool_fan_full_layer=3
+
+# Adhesion and support
+adhesion_type=skirt
+skirt_line_count=2
+skirt_gap=5
+support_enable=false
