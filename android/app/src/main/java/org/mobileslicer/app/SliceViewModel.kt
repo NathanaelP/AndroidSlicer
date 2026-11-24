@@ -65,6 +65,15 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         BuildVolume(it.float("machine_width") ?: 235f, it.float("machine_depth") ?: 230f, it.float("machine_height") ?: 270f)
     }
 
+    /** True when the placed model fits the build volume. */
+    fun fits(s: UiState = _state.value): Boolean {
+        val model = s.model ?: return false
+        if (scale(s) == null) return false
+        val (w, d, h) = placement(s).placedSize(model.info.bounds)
+        val v = volume(s)
+        return w <= v.width && d <= v.depth && h <= v.height
+    }
+
     fun filamentDiameter(s: UiState = _state.value): Float = profile(s).float("material_diameter") ?: 1.75f
 
     fun selectProfile(id: String) = _state.update { it.copy(profileId = id, slice = SliceState.Idle) }

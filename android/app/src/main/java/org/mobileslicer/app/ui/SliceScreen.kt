@@ -4,7 +4,8 @@ package org.mobileslicer.app.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,6 +48,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.mobileslicer.app.SliceState
 import org.mobileslicer.app.SliceViewModel
 import org.mobileslicer.app.UiState
+import org.mobileslicer.app.viewport.Viewport
+import org.mobileslicer.app.viewport.ViewportModel
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,17 +73,32 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
         topBar = { TopAppBar(title = { Text("MobileSlicer") }) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-            Column(
-                Modifier.widthIn(max = 720.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                // Many file pickers don't know STL/OBJ types, so accept anything and check the content.
-                ModelCard(state, onOpen = { openModel.launch(arrayOf("*/*")) })
-                if (state.model != null) {
-                    PlacementCard(state, vm)
-                    ProfileCard(state, vm)
-                    SliceCard(state, vm, onSave = { saveGcode.launch(vm.suggestedGcodeName()) })
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val v = vm.volume(state)
+            val model = state.model
+            val viewportModel = model?.let { ViewportModel(it.info, vm.placement(state), vm.fits(state)) }
+            val panel: @Composable (Modifier) -> Unit = { mod ->
+                Column(mod.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Many file pickers don't know STL/OBJ types, so accept anything and check the content.
+                    ModelCard(state, onOpen = { openModel.launch(arrayOf("*/*")) })
+                    if (model != null) {
+                        PlacementCard(state, vm)
+                        ProfileCard(state, vm)
+                        SliceCard(state, vm, onSave = { saveGcode.launch(vm.suggestedGcodeName()) })
+                    }
+                }
+            }
+            if (maxWidth >= 840.dp) {
+                // Tablet: viewport in the middle, settings panel on the right.
+                Row(Modifier.fillMaxSize()) {
+                    Viewport(Triple(v.width, v.depth, v.height), viewportModel, Modifier.weight(1f).fillMaxHeight())
+                    panel(Modifier.width(440.dp).fillMaxHeight())
+                }
+            } else {
+                // Phone: viewport on top, settings below.
+                Column(Modifier.fillMaxSize()) {
+                    Viewport(Triple(v.width, v.depth, v.height), viewportModel, Modifier.fillMaxWidth().weight(0.45f))
+                    panel(Modifier.fillMaxWidth().weight(0.55f))
                 }
             }
         }
@@ -231,10 +249,7 @@ private fun adhesion(type: String?) = when (type) {
 private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = Section("Slice") {
     val model = state.model ?: return@Section
     val scale = vm.scale(state)
-    val v = vm.volume(state)
-    val fits = scale != null && vm.placement(state).placedSize(model.info.bounds).let { (w, d, h) ->
-        w <= v.width && d <= v.depth && h <= v.height
-    }
+    val fits = vm.fits(state)
     when (val s = state.slice) {
         is SliceState.Running -> {
             LinearProgressIndicator(progress = { s.stagesDone.toFloat() / s.stageCount }, Modifier.fillMaxWidth())

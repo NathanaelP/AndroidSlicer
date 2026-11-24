@@ -7,7 +7,7 @@ The app itself: Kotlin and Jetpack Compose, with CuraEngine running as a separat
 | Module | What it does |
 | --- | --- |
 | `engine` | The core, with no UI. `MeshImporter` turns STL (ASCII or binary) and OBJ into a clean binary STL. `EngineRunner` runs CuraEngine and reports progress. `Profile` loads the JSON profiles built by [`profiles/build_profiles.py`](../profiles/README.md). It also holds the engine binaries and Cura's setting definitions, which `prepare-engine.sh` copies in. |
-| `app` | The Compose UI: open a model, place it, slice it, save the G-code. |
+| `app` | The Compose UI: open a model, place it, slice it, save the G-code. `viewport/` holds the 3D view (M3). |
 
 ## M1 scope
 
@@ -21,6 +21,24 @@ One screen:
 After slicing, `GcodePostProcessor` writes the real print time, filament length and model bounds into the G-code header (the engine leaves placeholders in command-line mode, and printer software reads them). It also checks that no nozzle temperature mid-print falls more than 30 °C below the print temperature. If one does, the app refuses to save the file.
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
+
+## 3D viewport (M3)
+
+An OpenGL ES 3.0 view of the bed (235 × 230 mm, 10 mm grid with heavier lines every 50 mm), the build-volume outline and the model.
+
+- **Gestures:** one finger orbits, two fingers pan and pinch to zoom, and a double tap or **Fit view** frames the model. Each newly opened model is framed automatically.
+- **Placement:** the model is drawn exactly where CuraEngine will put it, using `modelMatrix()`. That is the same scale and stand-upright transform the engine receives, then centred on the bed and resting on it. It turns red when it doesn't fit the build volume.
+- **Rendering:**
+  - The model is uploaded once, streamed in chunks from the importer's STL. Only positions are stored (36 bytes per triangle, about 72 MB for 2 million triangles).
+  - The fragment shader computes flat-shading normals from screen-space derivatives.
+  - Lighting is a key light from the upper left plus a headlight. It's two-sided, so meshes with flipped faces still read well.
+  - The view draws only when something changes, with 4× multisampling where the device offers it.
+- **Layout:** on screens at least 840 dp wide (a tablet in landscape) the viewport fills the left and the controls sit in a panel on the right. On a phone the viewport is on top, with the controls below.
+- **Exit-test readout:** the corner shows the triangle count, the frame rate while the view is moving, and how long the model took to load.
+
+Desktop checks, since a device isn't available in the build environment:
+- `tools/check_shaders.py` compiles the shaders embedded in the Kotlin source with Khronos `glslangValidator`.
+- `ViewportScenesTest` writes the matrices the app computes for a few scenes. `tools/render_preview.py` then draws them with the same shaders in WebGL2, through headless Chromium on SwiftShader. Run the unit tests first, then: `NODE_PATH=$(npm root -g) python3 android/tools/render_preview.py OUT_DIR`.
 
 ## Building
 
