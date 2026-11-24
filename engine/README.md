@@ -54,3 +54,12 @@ CuraEngine 5.13.0, clang 18 on x86_64 Linux, three identical runs:
 | Layers | Print time | Filament | Toolpath SHA-256 |
 | --- | --- | --- | --- |
 | 100 | 1602 s (26 min 42 s) | 4724 mm³ | `b3d1cb4d…85527eda87d4` |
+
+## Device results
+
+The same APK, run with the M0 test app. "PASS" means layers, print time, filament and toolpath hash all match the desktop reference exactly.
+
+| Date | Device | Android | Result | Slice time |
+| --- | --- | --- | --- | --- |
+| 2026-11-24 | Samsung Galaxy S25 Ultra (SM-S938U) | 17 (API 37) | PASS: identical to desktop | 0.06 s |
+| | Samsung Galaxy Tab S8+ (the planned M0 device) | 16 | Not run yet | |
