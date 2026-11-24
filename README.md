@@ -2,11 +2,14 @@
 
 A native Android slicer built on CuraEngine. It takes a Nomad Sculpt export (STL/OBJ) to G-code on the device and sends it to a Klipper printer through Moonraker, with no PC and no flash drive. First target: Elegoo Neptune 4 Pro.
 
-**Status:** planning. No code yet.
+**Status:** M0 and M1 passed. CuraEngine runs on Android with output identical to the desktop build, and a Nomad Sculpt export slices end to end on the device. Next: M2, real printer profiles built from Cura's definitions, including Elegoo's own start and end G-code.
 
 ## Documentation
 
 - [Architecture and milestones](docs/architecture-and-milestones.md): goals, scope, key technical decisions, milestones M0–M14, UI direction, and risks.
+- [Engine build](engine/README.md): how CuraEngine is built for Android and desktop, and what M0 found.
+- [Android app](android/README.md): the MobileSlicer app and how to build it.
+- [M0 test app](m0-test-app/README.md): the single-screen app that checked the engine runs on Android.
 
 ## License
 
@@ -25,7 +28,7 @@ This summary is for convenience only; the [LICENSE](LICENSE) text is what applie
 
 ### Third-party components
 
-MobileSlicer bundles CuraEngine, which is itself licensed under AGPL-3.0. Other bundled libraries and data keep their own licenses, which must be compatible with AGPL-3.0. They will be listed, with their licenses, in a `THIRD_PARTY_NOTICES` file as they are added.
+MobileSlicer bundles CuraEngine, which is itself licensed under AGPL-3.0. Other bundled libraries and data keep their own licenses, which must be compatible with AGPL-3.0. They are listed, with their licenses, in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### Contributing
 

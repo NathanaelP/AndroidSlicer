@@ -1,0 +1,6 @@
+# Desktop reference for the M0 exit test: CuraEngine 5.13.0 built by
+# engine/build.sh host (clang 18, x86_64 Linux), sliced with slice-cube.sh.
+layers=100
+print_time_s=1602
+filament_mm3=4724
+toolpath_sha256=b3d1cb4d49716ef911145d88c2314f66979458fc76aa05b74ea785527eda87d4
