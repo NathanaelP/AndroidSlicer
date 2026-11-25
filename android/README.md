@@ -7,7 +7,7 @@ The app itself: Kotlin and Jetpack Compose, with CuraEngine running as a separat
 | Module | What it does |
 | --- | --- |
 | `engine` | The core, with no UI. `MeshImporter` turns STL (ASCII or binary) and OBJ into a clean binary STL. `EngineRunner` runs CuraEngine and reports progress. `Profile` loads the JSON profiles built by [`profiles/build_profiles.py`](../profiles/README.md). It also holds the engine binaries and Cura's setting definitions, which `prepare-engine.sh` copies in. |
-| `app` | The Compose UI: open a model, place it, slice it, save the G-code. `viewport/` holds the 3D view (M3). |
+| `app` | The Compose UI: open models, place them, slice, save the G-code. `viewport/` holds the 3D view (M3); `scene/` holds the objects, arranging, undo and picking (M4). |
 
 ## M1 scope
 
@@ -21,6 +21,31 @@ One screen:
 After slicing, `GcodePostProcessor` writes the real print time, filament length and model bounds into the G-code header (the engine leaves placeholders in command-line mode, and printer software reads them). It also checks that no nozzle temperature mid-print falls more than 30 °C below the print temperature. If one does, the app refuses to save the file.
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
+
+## Several objects (M4)
+
+- **Objects:**
+  - **Add model** imports another STL or OBJ. It goes in the middle of the bed, or everything is re-arranged if the middle is taken.
+  - Tap an object (in the view or the list) to select it. Drag it in the view to move it: it follows your finger across the bed.
+  - **Arrange** lays everything out in rows, largest first. Objects are spaced for their brims (2 × `brim_width` + 4 mm) and the whole layout is centred.
+- **Selected object:**
+  - Scale or height, and **Fit to bed**.
+  - Rotate 90° around X, Y or Z, or 45° around Z. X 90° stands up a model exported with Y up.
+  - **Lay flat…**, then tap the face that should rest on the bed.
+  - Reset rotation, **Duplicate** and **Delete**.
+- **Always on the bed:** objects are dropped onto the bed automatically, like Cura's "drop down to build plate".
+- **Warnings:**
+  - Objects outside the build volume turn red, and slicing waits until they're back.
+  - Overlapping objects get a warning, since they'd print fused together.
+- **Undo/Redo:** in the top bar. A drag, or typing into one field, is one step.
+- **Slicing:** all objects go to the engine together. Each gets its own `mesh_rotation_matrix` (rotation and scale) and is loaded with `-l`. It's then centred, dropped and moved with `center_object` and `mesh_position_x/y` (see `EngineRunner.buildCommand`).
+- **Bounds after rotation:**
+  - Exact for 90° turns, from the import bounds.
+  - For other angles the importer keeps a sample of the mesh's vertices: one per cell of a grid 1/400 of the model's size (about 200,000 points for a 2-million-triangle sculpt, adding about 0.7 s to the import on a desktop).
+  - The engine always drops objects onto the bed exactly; the samples only affect what the app draws.
+- **Lay flat:** reads the object's mesh file and finds the tapped face with a ray-triangle test, then rotates that face to point straight down.
+
+Desktop check: `tools/check_placement.py PROFILE OUT_DIR` slices the three-object layout written by `ViewportScenesTest` and checks each object's extent in the G-code against where the app draws it. Run the unit tests first.
 
 ## 3D viewport (M3)
 
@@ -80,3 +105,4 @@ The first Nomad export (about 3 mm tall, since Nomad doesn't export in millimetr
 | 2026-11-24 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt export ("Senhor Leite"), scaled to 28.3 mm tall | **M1 exit test passed.** Sliced end to end on the device in 2.4 s: 142 layers, 14 min 9 s, 0.69 m of filament. The G-code was checked: header filled in, safe temperatures throughout, centred on the bed, extrusion on every layer. |
 | 2026-11-25 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt teddy bear, 4,498,610 triangles, scaled to 64.6 mm | **M3 exit test passed.** Loaded in 0.4 s and stayed at 98–114 fps while orbiting, panning and zooming. Two fixes came out of the test: the model's base showed through the bed when seen from below, and **Fit to bed** was squeezed on a phone. |
 | 2026-11-25 | Samsung Galaxy Tab S8+, landscape | Same 4.5-million-triangle teddy bear, version 0.3.1 | Sits flat on the bed with the fixes in place. About 55 fps while moving, and still smooth to use. First run of the tablet layout, with the viewport beside the settings panel. |
+| 2026-11-25 | Samsung Galaxy Tab S8+, landscape | Three Nomad Sculpt exports (2,057,182 triangles in total): one laid flat, one rotated, arranged | **M4 exit test passed.** Three objects sliced together on the tablet in 7.7 s: 532 layers, 3 h 21 min, 30.35 m of PLA. The viewport stayed at 121 fps. The G-code passes all 21 checks against the Normal profile. **Found:** one export held a second, tiny figure far from the main one, a leftover object in the Nomad scene. It would print in mid-air, starting 74 mm above the bed. Detecting floating parts is planned for M5 (mesh health). |

@@ -2,7 +2,6 @@
 package org.mobileslicer.app.viewport
 
 import org.mobileslicer.engine.Bounds
-import org.mobileslicer.engine.Placement
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
@@ -70,36 +69,6 @@ data class Vec3(val x: Float, val y: Float, val z: Float) {
     fun normalized(): Vec3 = length().let { if (it == 0f) this else this * (1f / it) }
 }
 
-/**
- * Model matrix that puts the mesh where CuraEngine will: apply the placement
- * (scale, stand upright), then centre it on the bed in X and Y and drop it so
- * it rests on Z = 0 (the engine's center_object with machine_center_is_zero off).
- */
-fun modelMatrix(bounds: Bounds, placement: Placement, bedWidth: Float, bedDepth: Float): FloatArray {
-    val s = placement.scale
-    // Same rows as Placement.matrix(): upright maps (x, y, z) to (x, -z, y).
-    val m = if (placement.upright) floatArrayOf(
-        s, 0f, 0f, 0f,
-        0f, 0f, s, 0f,
-        0f, -s, 0f, 0f,
-        0f, 0f, 0f, 1f,
-    ) else floatArrayOf(
-        s, 0f, 0f, 0f,
-        0f, s, 0f, 0f,
-        0f, 0f, s, 0f,
-        0f, 0f, 0f, 1f,
-    )
-    // Bounds after that transform.
-    val corners = listOf(
-        Vec3(bounds.minX, bounds.minY, bounds.minZ), Vec3(bounds.maxX, bounds.maxY, bounds.maxZ),
-    ).map { Mat4.transform(m, it) }
-    val minX = min(corners[0].x, corners[1].x); val maxX = max(corners[0].x, corners[1].x)
-    val minY = min(corners[0].y, corners[1].y); val maxY = max(corners[0].y, corners[1].y)
-    val minZ = min(corners[0].z, corners[1].z)
-    val t = Mat4.translation(bedWidth / 2f - (minX + maxX) / 2f, bedDepth / 2f - (minY + maxY) / 2f, -minZ)
-    return Mat4.mul(t, m)
-}
-
 /** A camera that orbits a target point. Angles in radians; world units are millimetres, Z up. */
 data class OrbitCamera(
     val target: Vec3,
@@ -165,12 +134,13 @@ data class OrbitCamera(
             return OrbitCamera(target, radius / sin(fov / 2f), yaw = (-PI / 2).toFloat(), pitch = 0.5f)
         }
 
-        /** Frames a model of the given placed size, sitting in the middle of the bed. */
-        fun framing(width: Float, depth: Float, modelSize: Triple<Float, Float, Float>, yaw: Float, pitch: Float): OrbitCamera {
-            val (w, d, h) = modelSize
+        /** Frames [b] (for example all objects on the bed), keeping the viewing angle. */
+        fun framing(b: Bounds, yaw: Float, pitch: Float): OrbitCamera {
+            val w = b.sizeX; val d = b.sizeY; val h = b.sizeZ
             val radius = max(5f, sqrt(w * w + d * d + h * h) / 2f)
             val fov = (40.0 * PI / 180.0).toFloat()
-            return OrbitCamera(Vec3(width / 2f, depth / 2f, h / 2f), (radius / sin(fov / 2f) * 1.1f).coerceIn(MIN_DISTANCE, MAX_DISTANCE), yaw, pitch)
+            val target = Vec3((b.minX + b.maxX) / 2f, (b.minY + b.maxY) / 2f, (b.minZ + b.maxZ) / 2f)
+            return OrbitCamera(target, (radius / sin(fov / 2f) * 1.1f).coerceIn(MIN_DISTANCE, MAX_DISTANCE), yaw, pitch).aboveBed()
         }
     }
 }

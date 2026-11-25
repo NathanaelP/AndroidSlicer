@@ -49,6 +49,8 @@ def check(profile: dict, gcode_lines: list[str]) -> list[tuple[bool, str]]:
     slowed: set[int] = set()
     layer_z: dict[int, float] = {}
     speeds: dict[str, Counter] = defaultdict(Counter)   # feature -> Counter(mm/s) on full-speed layers
+    flows: dict[str, list] = defaultdict(list)          # feature -> volumetric flow (mm3/s) of each move
+    filament_area = math.pi * (f("material_diameter") / 2) ** 2
     travel: Counter = Counter()
     retracts: Counter = Counter()                       # (amount, mm/s)
     primes: Counter = Counter()
@@ -101,6 +103,9 @@ def check(profile: dict, gcode_lines: list[str]) -> list[tuple[bool, str]]:
                     bounds = [min(bounds[0], x, nx), min(bounds[1], y, ny), max(bounds[2], x, nx), max(bounds[3], y, ny)]
                     if layer >= slowdown_layers and layer not in slowed:
                         speeds[feature][round(feed / 60, 2)] += 1
+                        length = math.hypot(nx - x, ny - y)
+                        if length > 0.5 and feed > 0:
+                            flows[feature].append(de * filament_area / (length / (feed / 60)))
                 elif not moved and nz == z and de < 0:
                     retracts[(round(-de, 4), round(feed / 60, 2))] += 1
                 elif not moved and nz == z and de > 0:
@@ -141,6 +146,14 @@ def check(profile: dict, gcode_lines: list[str]) -> list[tuple[bool, str]]:
     full_layers = [i for i in layer_z if i >= slowdown_layers and i not in slowed]
     expect(len(full_layers) > 0, f"{len(full_layers)} layers at full speed to check speeds on "
                                  f"(slow-down layers {slowdown_layers}, min-layer-time layers {len(slowed)})")
+    feature_width = {
+        "WALL-OUTER": "wall_line_width_0", "WALL-INNER": "wall_line_width_x", "FILL": "infill_line_width",
+        "SKIN": "skin_line_width", "SUPPORT": "support_line_width", "SKIRT": "skirt_brim_line_width",
+    }
+    # With flow equalization (Cura's default), thinner lines print faster and wider
+    # ones slower so the plastic flows at a constant rate. Then the flow, not the
+    # top speed, has to match the profile.
+    equalized = float(s.get("speed_equalize_flow_width_factor", "0")) > 0
     for feat, counter in sorted(speeds.items()):
         if feat not in feature_speed or not counter:
             continue
@@ -150,10 +163,20 @@ def check(profile: dict, gcode_lines: list[str]) -> list[tuple[bool, str]]:
         if feat == "FILL" and s.get("skin_support") == "True":
             allowed.add(f("skin_support_speed"))  # support for the top skin, on the layer below it
         found = sorted(counter)
-        ok = all(any(abs(v - a) < 0.05 for a in allowed) for v in found)
-        note = "" if want in found else f"; {key} itself isn't used on any full-speed layer of this model"
-        expect(ok, f"{feat}: {found} mm/s (profile {key} {want}" +
-               (f", skin_support_speed {f('skin_support_speed')}" if len(allowed) > 1 else "") + note + ")")
+        if all(any(abs(v - a) < 0.05 for a in allowed) for v in found):
+            note = "" if want in found else f"; {key} itself isn't used on any full-speed layer of this model"
+            expect(True, f"{feat}: {found} mm/s (profile {key} {want}" +
+                   (f", skin_support_speed {f('skin_support_speed')}" if len(allowed) > 1 else "") + note + ")")
+        elif equalized and feat in feature_width and flows[feat]:
+            nominal = max(allowed) * f(feature_width[feat]) * f("layer_height")
+            fl = sorted(flows[feat])
+            median, top = fl[len(fl) // 2], fl[-1]
+            ok = top <= nominal * 1.02 and (abs(median - nominal) <= nominal * 0.02 or median < nominal)
+            expect(ok, f"{feat}: speeds {found[0]}..{found[-1]} mm/s vary with line width (flow equalization); "
+                       f"flow median {median:.2f}, max {top:.2f} mm3/s, profile {key} x {feature_width[feat]} "
+                       f"x layer_height = {nominal:.2f} mm3/s")
+        else:
+            expect(False, f"{feat}: {found} mm/s (profile {key} {want})")
     if travel:
         want = f("speed_travel")
         top = max(travel)

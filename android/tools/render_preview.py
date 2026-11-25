@@ -94,16 +94,20 @@ try {
   gl.uniform4f(uColor, 0.30, 0.31, 0.34, 1); draw(grid, gl.LINES, 0, minor.length / 3);
   gl.uniform4f(uColor, 0.42, 0.44, 0.48, 1); draw(grid, gl.LINES, minor.length / 3, major.length / 3);
   gl.uniform4f(uColor, 0.45, 0.62, 0.85, 1); draw(vol, gl.LINES, 0, 24);
-  if (meshB64 && scene.model) {
-    const bytes = Uint8Array.from(atob(meshB64), ch => ch.charCodeAt(0));
-    const mesh = buf(new Float32Array(bytes.buffer));
-    const m = new Float32Array(scene.model);
-    gl.useProgram(model);
+  const colors = {amber: [0.96, 0.74, 0.30], selected: [0.45, 0.72, 1.0], red: [0.90, 0.36, 0.30]};
+  const bufs = {};
+  for (const [name, b64] of Object.entries(meshB64)) {
+    const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    bufs[name] = [buf(new Float32Array(bytes.buffer)), bytes.length / 12];
+  }
+  gl.useProgram(model);
+  for (const it of scene.items) {
+    const m = new Float32Array(it.model);
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uMvp'), false, mul(vp, m));
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uModelView'), false, mul(new Float32Array(scene.view), m));
-    const col = scene.color === 'red' ? [0.90, 0.36, 0.30] : [0.96, 0.74, 0.30];
-    gl.uniform3f(gl.getUniformLocation(model, 'uColor'), ...col);
-    draw(mesh, gl.TRIANGLES, 0, bytes.length / 12);
+    gl.uniform3f(gl.getUniformLocation(model, 'uColor'), ...colors[it.color]);
+    const [b, n] = bufs[it.mesh];
+    draw(b, gl.TRIANGLES, 0, n);
   }
   document.title = 'ok';
 } catch (err) { document.title = 'error: ' + err.message; }
@@ -135,7 +139,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for sc in scenes:
             html = Path(tmp) / f"{sc['name']}.html"
-            mesh = json.dumps(tris_to_b64(meshes[sc["mesh"]])) if sc["mesh"] else "null"
+            used = {it["mesh"] for it in sc["items"]}
+            mesh = json.dumps({name: tris_to_b64(meshes[name]) for name in used})
             html.write_text(PAGE % {"shaders": json.dumps(shaders()), "scene": json.dumps(sc), "mesh": mesh})
             jobs.append([str(html), str(out / f"{sc['name']}.png")])
         js = Path(tmp) / "render.js"

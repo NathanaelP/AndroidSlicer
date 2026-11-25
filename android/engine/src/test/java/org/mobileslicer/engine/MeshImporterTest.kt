@@ -130,6 +130,6 @@ class MeshImporterLargeFileTest {
         val info = src.inputStream().use { MeshImporter.import(it, src.name, out) }
         val seconds = (System.nanoTime() - start) / 1e9
         println("LARGE MESH: ${src.length() / 1_000_000} MB ${info.sourceFormat}, ${info.triangles} triangles, " +
-            "${info.skippedTriangles} skipped, ${"%.1f".format(seconds)} s, bounds ${info.bounds}")
+            "${info.skippedTriangles} skipped, ${"%.1f".format(seconds)} s (including ${info.samples.size / 3} sample points), bounds ${info.bounds}")
     }
 }

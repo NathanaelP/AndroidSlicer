@@ -14,15 +14,19 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-/** Everything the renderer draws besides the mesh itself. Replaced as a whole from the UI thread. */
+/** A mesh file the renderer may draw; [key] identifies it (duplicated objects share one). */
+data class MeshRef(val key: String, val file: File, val triangles: Long)
+
+/** One object to draw: which mesh, where (column-major model matrix), and in what colour. */
+data class DrawItem(val meshKey: String, val matrix: FloatArray, val color: FloatArray)
+
+/** Everything the renderer draws. Replaced as a whole from the UI thread. */
 data class SceneState(
     val camera: OrbitCamera,
     val bedWidth: Float,
     val bedDepth: Float,
     val bedHeight: Float,
-    /** Model matrix from [modelMatrix], or null to hide the model. */
-    val model: FloatArray?,
-    val modelColor: FloatArray,
+    val items: List<DrawItem>,
     val background: FloatArray,
 )
 
@@ -42,18 +46,15 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
 
     @Volatile var scene: SceneState? = null
 
-    // Mesh to show; read on the GL thread.
-    @Volatile private var meshFile: File? = null
-    @Volatile private var meshTriangles: Long = 0
-    @Volatile private var meshVersion: Long = 0
-    private var uploadedVersion = -1L
+    // Meshes to keep on the GPU; read on the GL thread.
+    @Volatile private var meshes: List<MeshRef> = emptyList()
+    private class Gpu(val vbo: Int, val triangles: Long)
+    private val uploaded = HashMap<String, Gpu>()
 
     private var width = 1
     private var height = 1
     private var modelProgram = 0
     private var flatProgram = 0
-    private var meshVbo = 0
-    private var drawnTriangles = 0L
     private var bedVbo = 0
     private var gridVbo = 0
     private var gridMinorCount = 0
@@ -68,22 +69,17 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
     private val frameIntervals = ArrayDeque<Long>()
     private var lastStatsNanos = 0L
 
-    /**
-     * Shows the mesh in [file] (binary STL from MeshImporter), or nothing if null.
-     * Re-uploads whenever [version] changes, since imports reuse the same file. Thread-safe.
-     */
-    fun setMesh(file: File?, triangles: Long, version: Long) {
-        meshFile = file
-        meshTriangles = triangles
-        meshVersion = version
+    /** The meshes the scene uses (binary STLs from MeshImporter). Thread-safe. */
+    fun setMeshes(refs: List<MeshRef>) {
+        meshes = refs
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // A new context: everything on the GPU is gone.
         modelProgram = program(MODEL_VS, MODEL_FS)
         flatProgram = program(FLAT_VS, FLAT_FS)
-        meshVbo = 0; bedVbo = 0; gridVbo = 0; volumeVbo = 0
-        uploadedVersion = -1L; geometryFor = null
+        bedVbo = 0; gridVbo = 0; volumeVbo = 0
+        uploaded.clear(); geometryFor = null
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LEQUAL)
     }
@@ -119,16 +115,22 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         glUniform4f(uColor, 0.45f, 0.62f, 0.85f, 1f)
         drawArrays(volumeVbo, GL_LINES, 0, 24)
 
-        // Model.
-        val model = s.model
-        if (model != null && meshVbo != 0 && drawnTriangles > 0) {
+        // Models.
+        if (s.items.isNotEmpty()) {
             glUseProgram(modelProgram)
-            val modelView = Mat4.mul(s.camera.view(), model)
-            glUniformMatrix4fv(glGetUniformLocation(modelProgram, "uMvp"), 1, false, Mat4.mul(viewProj, model), 0)
-            glUniformMatrix4fv(glGetUniformLocation(modelProgram, "uModelView"), 1, false, modelView, 0)
-            val c = s.modelColor
-            glUniform3f(glGetUniformLocation(modelProgram, "uColor"), c[0], c[1], c[2])
-            drawArrays(meshVbo, GL_TRIANGLES, 0, (drawnTriangles * 3).toInt())
+            val uMvp2 = glGetUniformLocation(modelProgram, "uMvp")
+            val uModelView = glGetUniformLocation(modelProgram, "uModelView")
+            val uColor2 = glGetUniformLocation(modelProgram, "uColor")
+            val view = s.camera.view()
+            for (item in s.items) {
+                val gpu = uploaded[item.meshKey] ?: continue
+                if (gpu.vbo == 0 || gpu.triangles <= 0) continue
+                glUniformMatrix4fv(uMvp2, 1, false, Mat4.mul(viewProj, item.matrix), 0)
+                glUniformMatrix4fv(uModelView, 1, false, Mat4.mul(view, item.matrix), 0)
+                val c = item.color
+                glUniform3f(uColor2, c[0], c[1], c[2])
+                drawArrays(gpu.vbo, GL_TRIANGLES, 0, (gpu.triangles * 3).toInt())
+            }
         }
         reportFrame()
     }
@@ -143,68 +145,80 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         glBindBuffer(GL_ARRAY_BUFFER, 0)
     }
 
-    /** (Re)uploads the mesh when the file changes. */
+    /** Uploads meshes the scene gained and frees those it no longer uses. */
     private fun syncMesh() {
-        val version = meshVersion
-        if (version == uploadedVersion) return
-        uploadedVersion = version
-        val file = meshFile
-        if (meshVbo != 0) { glDeleteBuffers(1, intArrayOf(meshVbo), 0); meshVbo = 0 }
-        drawnTriangles = 0
-        lastError = null
-        if (file == null || !file.exists()) { publish(); return }
-        val start = SystemClock.elapsedRealtime()
-        try {
-            drawnTriangles = uploadStl(file, meshTriangles)
-            lastUploadMillis = SystemClock.elapsedRealtime() - start
-        } catch (e: Exception) {
-            Log.w(TAG, "mesh upload failed", e)
-            lastError = e.message ?: e.javaClass.simpleName
-            if (meshVbo != 0) { glDeleteBuffers(1, intArrayOf(meshVbo), 0); meshVbo = 0 }
-            drawnTriangles = 0
+        val wanted = meshes
+        val keys = wanted.map { it.key }.toSet()
+        for (key in uploaded.keys - keys) {
+            uploaded.remove(key)?.let { if (it.vbo != 0) glDeleteBuffers(1, intArrayOf(it.vbo), 0) }
+            publish()
         }
-        publish()
+        for (ref in wanted) {
+            if (ref.key in uploaded) continue
+            val start = SystemClock.elapsedRealtime()
+            try {
+                val (vbo, tris) = uploadStl(ref.file, ref.triangles)
+                uploaded[ref.key] = Gpu(vbo, tris)
+                lastUploadMillis = SystemClock.elapsedRealtime() - start
+                lastError = null
+            } catch (e: Exception) {
+                Log.w(TAG, "mesh upload failed", e)
+                lastError = e.message ?: e.javaClass.simpleName
+                uploaded[ref.key] = Gpu(0, 0)  // don't retry every frame
+            }
+            publish()
+        }
     }
 
     /** Streams triangle positions from a binary STL into a vertex buffer, in chunks. */
-    private fun uploadStl(file: File, expected: Long): Long {
+    private fun uploadStl(file: File, expected: Long): Pair<Int, Long> {
         val triangles = minOf(expected, (file.length() - 84) / 50)
-        if (triangles <= 0) return 0
+        if (triangles <= 0) return 0 to 0L
         val bytes = triangles * 36
         if (bytes > Int.MAX_VALUE) throw IllegalStateException("Model too large to display")
         val ids = IntArray(1)
         glGenBuffers(1, ids, 0)
-        meshVbo = ids[0]
-        glBindBuffer(GL_ARRAY_BUFFER, meshVbo)
+        val vbo = ids[0]
+        glBindBuffer(GL_ARRAY_BUFFER, vbo)
         glBufferData(GL_ARRAY_BUFFER, bytes.toInt(), null, GL_STATIC_DRAW)
-        if (glGetError() == GL_OUT_OF_MEMORY) throw IllegalStateException("Not enough graphics memory for this model")
+        if (glGetError() == GL_OUT_OF_MEMORY) {
+            glDeleteBuffers(1, ids, 0)
+            throw IllegalStateException("Not enough graphics memory for this model")
+        }
 
-        val chunk = 32768
-        val record = ByteArray(50 * chunk)
-        val inBuf = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
-        val out = ByteBuffer.allocateDirect(36 * chunk).order(ByteOrder.nativeOrder())
-        val outFloats: FloatBuffer = out.asFloatBuffer()
         var done = 0L
-        BufferedInputStream(FileInputStream(file), 1 shl 16).use { input ->
-            var skip = 84L
-            while (skip > 0) skip -= input.skip(skip).also { if (it <= 0) throw IllegalStateException("Truncated mesh file") }
-            while (done < triangles) {
-                val n = minOf(chunk.toLong(), triangles - done).toInt()
-                var read = 0
-                while (read < 50 * n) {
-                    val r = input.read(record, read, 50 * n - read)
-                    if (r < 0) throw IllegalStateException("Truncated mesh file")
-                    read += r
+        // Free the buffer if reading fails partway.
+        try {
+            val chunk = 32768
+            val record = ByteArray(50 * chunk)
+            val inBuf = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
+            val out = ByteBuffer.allocateDirect(36 * chunk).order(ByteOrder.nativeOrder())
+            val outFloats: FloatBuffer = out.asFloatBuffer()
+            BufferedInputStream(FileInputStream(file), 1 shl 16).use { input ->
+                var skip = 84L
+                while (skip > 0) skip -= input.skip(skip).also { if (it <= 0) throw IllegalStateException("Truncated mesh file") }
+                while (done < triangles) {
+                    val n = minOf(chunk.toLong(), triangles - done).toInt()
+                    var read = 0
+                    while (read < 50 * n) {
+                        val r = input.read(record, read, 50 * n - read)
+                        if (r < 0) throw IllegalStateException("Truncated mesh file")
+                        read += r
+                    }
+                    outFloats.clear()
+                    for (t in 0 until n) for (i in 0 until 9) outFloats.put(inBuf.getFloat(50 * t + 12 + 4 * i))
+                    out.position(0).limit(36 * n)
+                    glBufferSubData(GL_ARRAY_BUFFER, (done * 36).toInt(), 36 * n, out)
+                    done += n
                 }
-                outFloats.clear()
-                for (t in 0 until n) for (i in 0 until 9) outFloats.put(inBuf.getFloat(50 * t + 12 + 4 * i))
-                out.position(0).limit(36 * n)
-                glBufferSubData(GL_ARRAY_BUFFER, (done * 36).toInt(), 36 * n, out)
-                done += n
             }
+        } catch (e: Exception) {
+            glBindBuffer(GL_ARRAY_BUFFER, 0)
+            glDeleteBuffers(1, ids, 0)
+            throw e
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0)
-        return done
+        return vbo to done
     }
 
     /** Bed plate, grid and build-volume outline for the current bed size. */
@@ -264,7 +278,8 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
 
     private fun publish() {
         val fps = if (frameIntervals.size >= 5) 1e9f / (frameIntervals.sum().toFloat() / frameIntervals.size) else null
-        onStats(RenderStats(drawnTriangles, fps, lastUploadMillis, lastError))
+        val drawn = scene?.items?.sumOf { uploaded[it.meshKey]?.triangles ?: 0L } ?: 0L
+        onStats(RenderStats(drawn, fps, lastUploadMillis, lastError))
     }
 
     private fun program(vs: String, fs: String): Int {
