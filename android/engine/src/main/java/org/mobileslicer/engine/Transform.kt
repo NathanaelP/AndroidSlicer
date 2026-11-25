@@ -113,7 +113,14 @@ data class Transform(
  * can be up to one sample cell (about 0.25% of the model's size) inside the
  * true bounds.
  */
-fun transformedBounds(mesh: MeshInfo, t: Transform): Bounds {
+fun transformedBounds(mesh: MeshInfo, t: Transform): Bounds =
+    transformedBounds(mesh.bounds, mesh.samples, 0, mesh.samples.size / 3, t)
+
+/** Bounds of one [part] of [mesh] after [t]; exact or sampled as for the whole mesh. */
+fun transformedBounds(mesh: MeshInfo, part: MeshPart, t: Transform): Bounds =
+    transformedBounds(part.bounds, mesh.samples, part.sampleStart, part.sampleCount, t)
+
+private fun transformedBounds(b: Bounds, samples: FloatArray, first: Int, count: Int, t: Transform): Bounds {
     val out = FloatArray(3)
     var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
     var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
@@ -123,13 +130,12 @@ fun transformedBounds(mesh: MeshInfo, t: Transform): Bounds {
         minY = min(minY, out[1]); maxY = max(maxY, out[1])
         minZ = min(minZ, out[2]); maxZ = max(maxZ, out[2])
     }
-    val b = mesh.bounds
-    if (t.isAxisAligned() || mesh.samples.isEmpty()) {
+    if (t.isAxisAligned() || count == 0) {
         for (x in listOf(b.minX, b.maxX)) for (y in listOf(b.minY, b.maxY)) for (z in listOf(b.minZ, b.maxZ)) add(x, y, z)
     } else {
-        val s = mesh.samples
-        var i = 0
-        while (i < s.size) { add(s[i], s[i + 1], s[i + 2]); i += 3 }
+        var i = 3 * first
+        val end = 3 * (first + count)
+        while (i < end) { add(samples[i], samples[i + 1], samples[i + 2]); i += 3 }
     }
     return Bounds(minX, minY, minZ, maxX, maxY, maxZ)
 }

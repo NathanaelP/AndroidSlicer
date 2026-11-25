@@ -36,9 +36,6 @@ def main() -> int:
     profile = json.loads(Path(sys.argv[1]).read_text())["settings"]
     out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
     objs = json.loads((ROOT / "app/build/placed-objects.json").read_text())
-    # The meshes named in the scene test.
-    meshes = {"cube": REPO / "engine/test/cube20.stl", "ybox": out / "ybox.stl"}
-    box_stl(meshes["ybox"], -5, 10, -2, 5, 50, 8)
     defs = WORK / "src/cura/resources/definitions"
     s = [a for k, v in profile.items() for a in ("-s", f"{k}={v}")]
     cx, cy = float(profile["machine_width"]) / 2, float(profile["machine_depth"]) / 2
@@ -47,7 +44,7 @@ def main() -> int:
     # One copy of each mesh file per object, so the G-code's ;MESH: names tell them apart.
     for i, o in enumerate(objs):
         copy = out / f"object{i}.stl"
-        copy.write_bytes(meshes[o["mesh"]].read_bytes())
+        copy.write_bytes(Path(o["mesh"]).read_bytes())
         cmd += ["-e0", "-s", f"mesh_rotation_matrix={o['matrix']}", "-l", str(copy),
                 "-s", "center_object=True", "-s", f"mesh_position_x={o['x'] - cx}", "-s", f"mesh_position_y={o['y'] - cy}",
                 "-s", "mesh_position_z=0"]
@@ -86,7 +83,7 @@ def main() -> int:
             and abs(got[5] - want[5]) <= float(profile["layer_height"]) + 0.01 and got[2] <= tol_z
         failed += not ok
         fmt = lambda b: "X %.1f..%.1f Y %.1f..%.1f Z %.1f..%.1f" % (b[0], b[3], b[1], b[4], b[2], b[5])
-        print(("PASS" if ok else "FAIL") + f"  object {i} ({o['mesh']}): app {fmt(want)} | engine {fmt(got) if got else 'none'}")
+        print(("PASS" if ok else "FAIL") + f"  object {i} ({Path(o['mesh']).name}): app {fmt(want)} | engine {fmt(got) if got else 'none'}")
     return 1 if failed else 0
 
 

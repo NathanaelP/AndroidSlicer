@@ -133,15 +133,19 @@ fun Viewport(
                     items = objects.map { o ->
                         val problem = o.id in problemIds
                         val selected = o.id == selectedId
-                        DrawItem(
-                            o.mesh.stl.path, o.modelMatrix(),
-                            when {
-                                problem && selected -> RED_SELECTED
-                                problem -> RED
-                                selected -> SELECTED
-                                else -> AMBER
-                            },
-                        )
+                        val base = when {
+                            problem && selected -> RED_SELECTED
+                            problem -> RED
+                            selected -> SELECTED
+                            else -> AMBER
+                        }
+                        // Floating parts in their own colour; parts are contiguous runs of triangles.
+                        val floating = o.floating.map { it.part }.toSet()
+                        val segments = if (floating.isEmpty()) listOf(Segment(0, o.mesh.triangles.toInt(), base))
+                        else o.mesh.parts.mapIndexed { i, part ->
+                            Segment(part.firstTriangle, part.triangles, if (i in floating) (if (selected) FLOATING_SELECTED else FLOATING) else base)
+                        }
+                        DrawItem(o.mesh.stl.path, o.modelMatrix(), segments)
                     },
                     background = BACKGROUND,
                 )
@@ -263,6 +267,8 @@ private val AMBER = floatArrayOf(0.96f, 0.74f, 0.30f)
 private val SELECTED = floatArrayOf(0.45f, 0.72f, 1.0f)
 private val RED = floatArrayOf(0.90f, 0.36f, 0.30f)
 private val RED_SELECTED = floatArrayOf(1.0f, 0.55f, 0.50f)
+private val FLOATING = floatArrayOf(0.74f, 0.42f, 0.95f)
+private val FLOATING_SELECTED = floatArrayOf(0.86f, 0.62f, 1.0f)
 private val BACKGROUND = floatArrayOf(0.11f, 0.11f, 0.13f, 1f)
 
 /** Asks for an OpenGL ES 3 config with 4x multisampling, falling back to none. */

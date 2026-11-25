@@ -17,8 +17,15 @@ import javax.microedition.khronos.opengles.GL10
 /** A mesh file the renderer may draw; [key] identifies it (duplicated objects share one). */
 data class MeshRef(val key: String, val file: File, val triangles: Long)
 
-/** One object to draw: which mesh, where (column-major model matrix), and in what colour. */
-data class DrawItem(val meshKey: String, val matrix: FloatArray, val color: FloatArray)
+/** A run of triangles in one colour: triangles [first] until [first] + [count]. */
+data class Segment(val first: Int, val count: Int, val color: FloatArray)
+
+/**
+ * One object to draw: which mesh, where (column-major model matrix), and its
+ * colours as runs of triangles. Parts are contiguous in the mesh, so a part can
+ * have its own colour.
+ */
+data class DrawItem(val meshKey: String, val matrix: FloatArray, val segments: List<Segment>)
 
 /** Everything the renderer draws. Replaced as a whole from the UI thread. */
 data class SceneState(
@@ -127,9 +134,14 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
                 if (gpu.vbo == 0 || gpu.triangles <= 0) continue
                 glUniformMatrix4fv(uMvp2, 1, false, Mat4.mul(viewProj, item.matrix), 0)
                 glUniformMatrix4fv(uModelView, 1, false, Mat4.mul(view, item.matrix), 0)
-                val c = item.color
-                glUniform3f(uColor2, c[0], c[1], c[2])
-                drawArrays(gpu.vbo, GL_TRIANGLES, 0, (gpu.triangles * 3).toInt())
+                for (seg in item.segments) {
+                    val first = seg.first.toLong().coerceIn(0, gpu.triangles)
+                    val count = seg.count.toLong().coerceIn(0, gpu.triangles - first)
+                    if (count == 0L) continue
+                    val c = seg.color
+                    glUniform3f(uColor2, c[0], c[1], c[2])
+                    drawArrays(gpu.vbo, GL_TRIANGLES, (first * 3).toInt(), (count * 3).toInt())
+                }
             }
         }
         reportFrame()

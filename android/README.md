@@ -22,6 +22,17 @@ After slicing, `GcodePostProcessor` writes the real print time, filament length 
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
 
+## Mesh health (M5): floating parts
+
+- **Parts on import:** `MeshParts` finds a mesh's connected parts, meaning triangles joined through shared corners (corners are matched by exact coordinates, which is how exporters write shared vertices). It then rewrites the mesh with each part's triangles together, largest part first, recording each part's exact bounds and its own sample points.
+  - A single-part mesh, the usual case, is just renamed with no rewrite.
+  - A "triangle soup" with more than 10,000 parts is treated as one part.
+  - On a desktop, importing 2 million triangles takes about 2–3 s in all.
+  - Sample points now also cover the surface of large triangles, spaced 1/100 of the model's size, so flat faces of simple models count too.
+- **Floating parts:** a part floats when, after the object's rotation and scale, its lowest point is more than 0.3 mm above the bed, and no part that reaches lower has surface inside its box. So an eye pushed into a head, a hat sitting on one, or an arm sticking out of a body counts as attached, while a loose piece above the model doesn't. This works from sample points, so it's an estimate.
+- **Shown:** floating parts are drawn in purple. The objects list, the selected object's card and the slice card all say how high they start. Slicing is still allowed, since supports (M8/M10) are what make such parts printable.
+- **Next:** Split into parts, which turns parts into separate objects. The grouped part ranges make it a matter of copying each range into its own mesh file.
+
 ## Several objects (M4)
 
 - **Objects:**

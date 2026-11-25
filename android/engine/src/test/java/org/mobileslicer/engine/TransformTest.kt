@@ -63,7 +63,7 @@ class TransformTest {
     @Test fun boundsAfterRotation() {
         val cube = File("../../engine/test/cube20.stl").readBytes()
         val info = MeshImporter.import(ByteArrayInputStream(cube), "cube.stl", tmp.newFile("c.stl"))
-        assertEquals(8 * 3, info.samples.size) // the 8 corners, one per cell
+        assert(info.samples.size > 8 * 3) // the 8 corners plus points across the faces
         // Axis-aligned: exact, from the import bounds.
         val up = transformedBounds(info, Transform(scale = 2f).thenRotate(Transform.rotationX(90f)))
         assertEquals(Bounds(-20f, -40f, -20f, 20f, 0f, 20f), up)

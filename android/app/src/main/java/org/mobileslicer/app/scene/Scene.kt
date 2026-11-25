@@ -26,6 +26,9 @@ data class SceneObject(
     /** Bounds after the transform, before moving it onto the bed. */
     val localBounds: Bounds by lazy { transformedBounds(mesh, transform) }
 
+    /** Parts that would print in mid-air (see [floatingParts]); worked out once per object state. */
+    val floating: List<FloatingPart> by lazy { floatingParts() }
+
     /** Bounds where it sits on the bed. */
     val bounds: Bounds by lazy {
         val b = localBounds

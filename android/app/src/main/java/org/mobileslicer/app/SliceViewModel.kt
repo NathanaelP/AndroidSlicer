@@ -257,19 +257,21 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
                 val info = withContext(Dispatchers.IO) {
                     val input = resolver.openInputStream(uri) ?: error("Couldn't open the file.")
                     input.use {
-                        MeshImporter.import(it, name, File(workDir, "mesh-$id.stl")) { read ->
-                            _state.update { s -> s.copy(importing = Triple(name, read, size)) }
-                        }
+                        MeshImporter.import(
+                            it, name, File(workDir, "mesh-$id.stl"),
+                            progress = { read -> _state.update { s -> s.copy(importing = Triple(name, read, size)) } },
+                            onAnalysing = { _state.update { s -> s.copy(busy = "Finding separate parts…") } },
+                        )
                     }
                 }
-                _state.update { it.copy(importing = null) }
+                _state.update { it.copy(importing = null, busy = null) }
                 history.breakMerge()
                 val obj = SceneObject(id, name, info, Transform(), 0f, 0f)
                 edit { s -> Scene(placeNew(s.objects, obj, volume(), spacing()), id) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(importing = null, message = "Couldn't read $name: ${e.message}") }
+                _state.update { it.copy(importing = null, busy = null, message = "Couldn't read $name: ${e.message}") }
             }
         }
     }

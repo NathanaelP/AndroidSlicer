@@ -29,6 +29,16 @@ def shaders() -> dict:
     return {name: body for name, _, body in re.findall(r'const val (\w+_(VS|FS)) = """(.*?)"""', src, re.S)}
 
 
+def stl_positions(path: str) -> list:
+    """Vertex positions of a binary STL, in file order (the order the app uploads them)."""
+    data = Path(path).read_bytes()
+    n = struct.unpack_from("<I", data, 80)[0]
+    out = []
+    for t in range(n):
+        out += struct.unpack_from("<9f", data, 84 + 50 * t + 12)
+    return out
+
+
 def tris_to_b64(tris: list) -> str:
     return base64.b64encode(struct.pack(f"<{len(tris)}f", *tris)).decode()
 
@@ -94,7 +104,8 @@ try {
   gl.uniform4f(uColor, 0.30, 0.31, 0.34, 1); draw(grid, gl.LINES, 0, minor.length / 3);
   gl.uniform4f(uColor, 0.42, 0.44, 0.48, 1); draw(grid, gl.LINES, minor.length / 3, major.length / 3);
   gl.uniform4f(uColor, 0.45, 0.62, 0.85, 1); draw(vol, gl.LINES, 0, 24);
-  const colors = {amber: [0.96, 0.74, 0.30], selected: [0.45, 0.72, 1.0], red: [0.90, 0.36, 0.30]};
+  const colors = {amber: [0.96, 0.74, 0.30], selected: [0.45, 0.72, 1.0], red: [0.90, 0.36, 0.30],
+                  floating: [0.74, 0.42, 0.95], floating_selected: [0.86, 0.62, 1.0]};
   const bufs = {};
   for (const [name, b64] of Object.entries(meshB64)) {
     const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
@@ -105,9 +116,11 @@ try {
     const m = new Float32Array(it.model);
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uMvp'), false, mul(vp, m));
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uModelView'), false, mul(new Float32Array(scene.view), m));
-    gl.uniform3f(gl.getUniformLocation(model, 'uColor'), ...colors[it.color]);
-    const [b, n] = bufs[it.mesh];
-    draw(b, gl.TRIANGLES, 0, n);
+    const [b] = bufs[it.mesh];
+    for (const [first, count, color] of it.segments) {
+      gl.uniform3f(gl.getUniformLocation(model, 'uColor'), ...colors[color]);
+      draw(b, gl.TRIANGLES, first * 3, count * 3);
+    }
   }
   document.title = 'ok';
 } catch (err) { document.title = 'error: ' + err.message; }
@@ -134,13 +147,12 @@ def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     out.mkdir(parents=True, exist_ok=True)
     scenes = json.loads((ROOT / "app/build/viewport-scenes.json").read_text())
-    meshes = {"cube": box(-10, -10, 0, 10, 10, 20), "ybox": box(-5, 10, -2, 5, 50, 8), "sphere": sphere(40)}
     jobs = []
     with tempfile.TemporaryDirectory() as tmp:
         for sc in scenes:
             html = Path(tmp) / f"{sc['name']}.html"
             used = {it["mesh"] for it in sc["items"]}
-            mesh = json.dumps({name: tris_to_b64(meshes[name]) for name in used})
+            mesh = json.dumps({path: tris_to_b64(stl_positions(path)) for path in used})
             html.write_text(PAGE % {"shaders": json.dumps(shaders()), "scene": json.dumps(sc), "mesh": mesh})
             jobs.append([str(html), str(out / f"{sc['name']}.png")])
         js = Path(tmp) / "render.js"
