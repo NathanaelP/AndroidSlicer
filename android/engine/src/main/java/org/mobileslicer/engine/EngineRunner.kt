@@ -13,24 +13,12 @@ import java.io.File
 import java.io.IOException
 import kotlin.math.PI
 
-/** How the mesh is placed before slicing. The engine centres it on the bed and drops it to the plate. */
-data class Placement(
-    /** Uniform scale, 1.0 = as imported (mesh units taken as millimetres). */
-    val scale: Float = 1f,
-    /** Rotate +90° about X, turning a Y-up model (common in sculpting apps) Z-up. */
-    val upright: Boolean = false,
-) {
-    /** Row-major 3x3 matrix in CuraEngine's mesh_rotation_matrix format. */
-    fun matrix(): String {
-        val s = scale.toDouble()
-        return if (upright) "[[$s,0,0],[0,0,${-s}],[0,$s,0]]" else "[[$s,0,0],[0,$s,0],[0,0,$s]]"
-    }
-
-    /** Size of [b] in millimetres once placed: (width, depth, height). */
-    fun placedSize(b: Bounds): Triple<Float, Float, Float> =
-        if (upright) Triple(b.sizeX * scale, b.sizeZ * scale, b.sizeY * scale)
-        else Triple(b.sizeX * scale, b.sizeY * scale, b.sizeZ * scale)
-}
+/**
+ * One object on the bed: a mesh (binary STL), how it's turned and sized, and
+ * where the centre of its footprint sits, in bed coordinates (mm). The engine
+ * drops it onto the bed itself.
+ */
+data class PlacedObject(val mesh: File, val transform: Transform, val centerX: Float, val centerY: Float)
 
 data class SliceResult(
     val gcode: File,
@@ -63,42 +51,22 @@ class EngineRunner(private val context: Context) {
     val stages = listOf("slice", "layerparts", "inset+skin", "support", "export", "process")
 
     /**
-     * Slices [mesh] (a binary STL) with [profile] and writes [output].
+     * Slices [objects] together with [profile] and writes [output].
      * [onStage] is called with the number of stages finished, 0 to [stages].size.
      * Cancelling the calling coroutine kills the engine process.
      */
     suspend fun slice(
-        mesh: File,
+        objects: List<PlacedObject>,
         profile: Profile,
-        placement: Placement,
         output: File,
         onStage: (done: Int) -> Unit = {},
     ): SliceResult = withContext(Dispatchers.IO) {
+        require(objects.isNotEmpty()) { "Nothing to slice" }
         val defs = definitionsDir()
         val libDir = context.applicationInfo.nativeLibraryDir
         val log = File(output.parentFile, output.nameWithoutExtension + ".log")
         output.delete()
-
-        val settings = profile.settings.flatMap { (k, v) -> listOf("-s", "$k=$v") }
-        val cmd = buildList {
-            add(File(libDir, "libcuraengine.so").path)
-            add("slice")
-            add("-d"); add(defs.path)
-            // No Cura frontend resolves settings here, so load parent and formula-only
-            // settings too (see engine/README.md).
-            add("--force-read-parent"); add("--force-read-nondefault")
-            add("-j"); add(File(defs, "fdmprinter.def.json").path)
-            addAll(settings)
-            // Apply the profile to extruder 0 as well; its own defaults would win otherwise.
-            add("-e0")
-            addAll(settings)
-            // Cura positions models in its frontend; here the engine centres the
-            // model on the bed and drops it to the plate.
-            add("-s"); add("center_object=True")
-            add("-s"); add("mesh_rotation_matrix=${placement.matrix()}")
-            add("-l"); add(mesh.path)
-            add("-o"); add(output.path)
-        }
+        val cmd = buildCommand(File(libDir, "libcuraengine.so"), defs, profile, objects, output)
 
         val pb = ProcessBuilder(cmd).directory(output.parentFile).redirectErrorStream(true)
         pb.environment()["LD_LIBRARY_PATH"] = libDir
@@ -166,6 +134,43 @@ class EngineRunner(private val context: Context) {
         if (log.exists()) log.readLines().takeLast(30).joinToString("\n") { it.take(300) } else ""
 
     companion object {
+        /**
+         * The engine command line. Each object gets its own rotation and scale
+         * (mesh_rotation_matrix is read when the mesh is loaded), then is centred
+         * on the bed, dropped onto it, and moved to its spot with mesh_position_x/y,
+         * which the engine adds after centring.
+         */
+        fun buildCommand(engine: File, defs: File, profile: Profile, objects: List<PlacedObject>, output: File): List<String> {
+            val settings = profile.settings.flatMap { (k, v) -> listOf("-s", "$k=$v") }
+            val bedCenterX = (profile.float("machine_width") ?: 0f) / 2f
+            val bedCenterY = (profile.float("machine_depth") ?: 0f) / 2f
+            return buildList {
+                add(engine.path)
+                add("slice")
+                add("-d"); add(defs.path)
+                // No Cura frontend resolves settings here, so load parent and formula-only
+                // settings too (see engine/README.md).
+                add("--force-read-parent"); add("--force-read-nondefault")
+                add("-j"); add(File(defs, "fdmprinter.def.json").path)
+                addAll(settings)
+                // Apply the profile to extruder 0 as well; its own defaults would win otherwise.
+                add("-e0")
+                addAll(settings)
+                for (o in objects) {
+                    // Back to the extruder, so this object's rotation doesn't land on the previous object.
+                    add("-e0")
+                    add("-s"); add("mesh_rotation_matrix=${o.transform.matrix()}")
+                    add("-l"); add(o.mesh.path)
+                    // Settings after -l belong to this object.
+                    add("-s"); add("center_object=True")
+                    add("-s"); add("mesh_position_x=${o.centerX - bedCenterX}")
+                    add("-s"); add("mesh_position_y=${o.centerY - bedCenterY}")
+                    add("-s"); add("mesh_position_z=0")
+                }
+                add("-o"); add(output.path)
+            }
+        }
+
         private val PROGRESS = Regex("""Progress: (\S+) accomplished""")
         private val PRINT_TIME = Regex("""Print time \(s\): (\d+)""")
         private val FILAMENT = Regex("""Filament \(mm\^3\): (\d+)""")

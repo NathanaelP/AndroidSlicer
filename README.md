@@ -2,7 +2,7 @@
 
 A native Android slicer built on CuraEngine. It takes a Nomad Sculpt export (STL/OBJ) to G-code on the device and sends it to a Klipper printer through Moonraker, with no PC and no flash drive. First target: Elegoo Neptune 4 Pro.
 
-**Status:** M0 to M3 passed. CuraEngine runs on Android with output identical to the desktop build. A Nomad Sculpt export slices end to end on the device. A calibration cube printed cleanly with profiles built from Cura's own definitions. The 3D viewport stays at around 100 fps with a 4.5-million-triangle sculpt. Next: M4, moving, rotating and scaling models, with several models in one job.
+**Status:** milestone M4, model handling: several objects, move, rotate, scale, lay flat, arrange, undo and redo. M0 to M3 passed: CuraEngine on Android, a Nomad Sculpt export sliced on the device, a calibration cube printed with profiles from Cura's own definitions, and a 3D viewport that stays smooth with a 4.5-million-triangle sculpt.
 
 ## Documentation
 

@@ -7,7 +7,7 @@ The app itself: Kotlin and Jetpack Compose, with CuraEngine running as a separat
 | Module | What it does |
 | --- | --- |
 | `engine` | The core, with no UI. `MeshImporter` turns STL (ASCII or binary) and OBJ into a clean binary STL. `EngineRunner` runs CuraEngine and reports progress. `Profile` loads the JSON profiles built by [`profiles/build_profiles.py`](../profiles/README.md). It also holds the engine binaries and Cura's setting definitions, which `prepare-engine.sh` copies in. |
-| `app` | The Compose UI: open a model, place it, slice it, save the G-code. `viewport/` holds the 3D view (M3). |
+| `app` | The Compose UI: open models, place them, slice, save the G-code. `viewport/` holds the 3D view (M3); `scene/` holds the objects, arranging, undo and picking (M4). |
 
 ## M1 scope
 
@@ -21,6 +21,31 @@ One screen:
 After slicing, `GcodePostProcessor` writes the real print time, filament length and model bounds into the G-code header (the engine leaves placeholders in command-line mode, and printer software reads them). It also checks that no nozzle temperature mid-print falls more than 30 °C below the print temperature. If one does, the app refuses to save the file.
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
+
+## Several objects (M4)
+
+- **Objects:**
+  - **Add model** imports another STL or OBJ. It goes in the middle of the bed, or everything is re-arranged if the middle is taken.
+  - Tap an object (in the view or the list) to select it. Drag it in the view to move it: it follows your finger across the bed.
+  - **Arrange** lays everything out in rows, largest first. Objects are spaced for their brims (2 × `brim_width` + 4 mm) and the whole layout is centred.
+- **Selected object:**
+  - Scale or height, and **Fit to bed**.
+  - Rotate 90° around X, Y or Z, or 45° around Z. X 90° stands up a model exported with Y up.
+  - **Lay flat…**, then tap the face that should rest on the bed.
+  - Reset rotation, **Duplicate** and **Delete**.
+- **Always on the bed:** objects are dropped onto the bed automatically, like Cura's "drop down to build plate".
+- **Warnings:**
+  - Objects outside the build volume turn red, and slicing waits until they're back.
+  - Overlapping objects get a warning, since they'd print fused together.
+- **Undo/Redo:** in the top bar. A drag, or typing into one field, is one step.
+- **Slicing:** all objects go to the engine together. Each gets its own `mesh_rotation_matrix` (rotation and scale) and is loaded with `-l`. It's then centred, dropped and moved with `center_object` and `mesh_position_x/y` (see `EngineRunner.buildCommand`).
+- **Bounds after rotation:**
+  - Exact for 90° turns, from the import bounds.
+  - For other angles the importer keeps a sample of the mesh's vertices: one per cell of a grid 1/400 of the model's size (about 200,000 points for a 2-million-triangle sculpt, adding about 0.7 s to the import on a desktop).
+  - The engine always drops objects onto the bed exactly; the samples only affect what the app draws.
+- **Lay flat:** reads the object's mesh file and finds the tapped face with a ray-triangle test, then rotates that face to point straight down.
+
+Desktop check: `tools/check_placement.py PROFILE OUT_DIR` slices the three-object layout written by `ViewportScenesTest` and checks each object's extent in the G-code against where the app draws it. Run the unit tests first.
 
 ## 3D viewport (M3)
 

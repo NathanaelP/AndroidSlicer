@@ -4,8 +4,6 @@ package org.mobileslicer.app.viewport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.mobileslicer.engine.Bounds
-import org.mobileslicer.engine.Placement
 import kotlin.math.PI
 
 class ViewMathTest {
@@ -13,26 +11,6 @@ class ViewMathTest {
         assertEquals("x", expected.x, actual.x, eps)
         assertEquals("y", expected.y, actual.y, eps)
         assertEquals("z", expected.z, actual.z, eps)
-    }
-
-    /** A box exported off-centre and below zero, like many sculpt exports. */
-    private val box = Bounds(-5f, 10f, -2f, 5f, 50f, 8f) // 10 x 40 x 10
-
-    @Test fun modelIsCentredOnTheBedAndRestsOnIt() {
-        val m = modelMatrix(box, Placement(1f, false), 235f, 230f)
-        assertVec(Vec3(112.5f, 95f, 0f), Mat4.transform(m, Vec3(-5f, -10f + 20f, -2f)))  // min corner
-        assertVec(Vec3(122.5f, 135f, 10f), Mat4.transform(m, Vec3(5f, 50f, 8f)))        // max corner
-    }
-
-    @Test fun uprightTurnsYUpIntoZUpLikeTheEngine() {
-        val m = modelMatrix(box, Placement(0.5f, true), 235f, 230f)
-        // Upright maps (x, y, z) -> (x, -z, y) * scale: height comes from Y (40 mm * 0.5 = 20 mm).
-        val lo = Mat4.transform(m, Vec3(-5f, 10f, 8f))
-        val hi = Mat4.transform(m, Vec3(5f, 50f, -2f))
-        assertVec(Vec3(115f, 112.5f, 0f), lo)
-        assertVec(Vec3(120f, 117.5f, 20f), hi)
-        // The engine's matrix string for the same placement has the same rows.
-        assertEquals("[[0.5,0,0],[0,0,-0.5],[0,0.5,0]]", Placement(0.5f, true).matrix())
     }
 
     @Test fun cameraLooksAtItsTarget() {

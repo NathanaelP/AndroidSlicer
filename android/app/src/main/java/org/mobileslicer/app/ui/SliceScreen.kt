@@ -3,19 +3,20 @@ package org.mobileslicer.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,8 +35,9 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -51,7 +55,6 @@ import org.mobileslicer.app.SliceState
 import org.mobileslicer.app.SliceViewModel
 import org.mobileslicer.app.UiState
 import org.mobileslicer.app.viewport.Viewport
-import org.mobileslicer.app.viewport.ViewportModel
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,25 +69,47 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
     val saveGcode = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/x.gcode")) { uri ->
         if (uri != null) vm.saveGcode(uri)
     }
+    // Many file pickers don't know STL/OBJ types, so accept anything and check the content.
+    val onOpen = { openModel.launch(arrayOf("*/*")) }
 
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); vm.clearMessage() }
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("MobileSlicer") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("MobileSlicer") },
+                actions = {
+                    TextButton(onClick = vm::undo, enabled = state.canUndo) { Text("Undo") }
+                    TextButton(onClick = vm::redo, enabled = state.canRedo) { Text("Redo") }
+                },
+            )
+        },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val v = vm.volume(state)
-            val model = state.model
-            val viewportModel = model?.let { ViewportModel(it.info, vm.placement(state), vm.fits(state)) }
+            val problems = vm.outOfBounds(state).map { it.id }.toSet()
+            val viewport: @Composable (Modifier) -> Unit = { mod ->
+                Viewport(
+                    volume = v,
+                    objects = state.scene.objects,
+                    selectedId = state.scene.selectedId,
+                    problemIds = problems,
+                    layFlatMode = state.layFlatMode,
+                    onSelect = vm::select,
+                    onMove = vm::moveBy,
+                    onMoveEnd = vm::moveEnd,
+                    onFaceTap = vm::layFlatAt,
+                    modifier = mod,
+                )
+            }
             val panel: @Composable (Modifier) -> Unit = { mod ->
                 Column(mod.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // Many file pickers don't know STL/OBJ types, so accept anything and check the content.
-                    ModelCard(state, onOpen = { openModel.launch(arrayOf("*/*")) })
-                    if (model != null) {
-                        PlacementCard(state, vm)
+                    ObjectsCard(state, vm, onOpen)
+                    if (state.scene.selected != null) SelectedCard(state, vm)
+                    if (state.scene.objects.isNotEmpty()) {
                         ProfileCard(state, vm)
                         SliceCard(state, vm, onSave = { saveGcode.launch(vm.suggestedGcodeName()) })
                     }
@@ -93,13 +118,13 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
             if (maxWidth >= 840.dp) {
                 // Tablet: viewport in the middle, settings panel on the right.
                 Row(Modifier.fillMaxSize()) {
-                    Viewport(Triple(v.width, v.depth, v.height), viewportModel, Modifier.weight(1f).fillMaxHeight())
+                    viewport(Modifier.weight(1f).fillMaxHeight())
                     panel(Modifier.width(440.dp).fillMaxHeight())
                 }
             } else {
                 // Phone: viewport on top, settings below.
                 Column(Modifier.fillMaxSize()) {
-                    Viewport(Triple(v.width, v.depth, v.height), viewportModel, Modifier.fillMaxWidth().weight(0.45f))
+                    viewport(Modifier.fillMaxWidth().weight(0.45f))
                     panel(Modifier.fillMaxWidth().weight(0.55f))
                 }
             }
@@ -117,45 +142,56 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelCard(state: UiState, onOpen: () -> Unit) = Section("Model") {
+private fun ObjectsCard(state: UiState, vm: SliceViewModel, onOpen: () -> Unit) = Section("Objects") {
     val importing = state.importing
-    val model = state.model
-    when {
-        importing != null -> {
-            val (name, read, total) = importing
-            Text("Reading $name…")
-            if (total != null && total > 0) {
-                LinearProgressIndicator(progress = { (read.toFloat() / total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
-            } else {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
+    if (importing != null) {
+        val (name, read, total) = importing
+        Text("Reading $name…")
+        if (total != null && total > 0) {
+            LinearProgressIndicator(progress = { (read.toFloat() / total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        model != null -> {
-            val b = model.info.bounds
-            Text(model.name, style = MaterialTheme.typography.bodyLarge)
-            Text("${model.info.sourceFormat} · ${"%,d".format(model.info.triangles)} triangles")
-            Text("Size as exported: ${mm(b.sizeX)} × ${mm(b.sizeY)} × ${mm(b.sizeZ)} mm (X × Y × Z)")
-            if (model.info.skippedTriangles > 0) {
+    }
+    val objects = state.scene.objects
+    if (objects.isEmpty() && importing == null) {
+        Text("Open an STL or OBJ file, for example an export from Nomad Sculpt.")
+    }
+    val outOfBounds = vm.outOfBounds(state).map { it.id }.toSet()
+    objects.forEach { o ->
+        val selected = o.id == state.scene.selectedId
+        Surface(
+            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth().clickable { vm.select(if (selected) null else o.id) },
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(o.name, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                val b = o.bounds
                 Text(
-                    "${"%,d".format(model.info.skippedTriangles)} broken triangles were skipped.",
-                    color = MaterialTheme.colorScheme.error,
+                    "${mm(b.sizeX)} × ${mm(b.sizeY)} × ${mm(b.sizeZ)} mm · %,d triangles".format(o.mesh.triangles) +
+                        if (o.id in outOfBounds) " · outside the bed" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (o.id in outOfBounds) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(onClick = onOpen) { Text("Open another model") }
         }
-        else -> {
-            Text("Open an STL or OBJ file, for example an export from Nomad Sculpt.")
-            Button(onClick = onOpen) { Text("Open model") }
-        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = onOpen, enabled = importing == null) { Text(if (objects.isEmpty()) "Open model" else "Add model") }
+        if (objects.size > 1) OutlinedButton(onClick = vm::arrangeAll) { Text("Arrange") }
+    }
+    if (objects.isNotEmpty()) {
+        Text("Drag an object in the view to move it. Tap one to select it.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placement") {
-    val model = state.model ?: return@Section
-    val scale = vm.scale(state)
+private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected: ${state.scene.selected?.name ?: ""}") {
+    val o = state.scene.selected ?: return@Section
     // Wraps on narrow screens, so Fit to bed moves to its own line instead of being squeezed.
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -167,9 +203,8 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
             onValueChange = vm::setScalePercent,
             label = { Text("Scale %") },
             singleLine = true,
-            isError = scale == null,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.width(140.dp),
+            modifier = Modifier.width(130.dp),
         )
         OutlinedTextField(
             value = state.heightMm,
@@ -177,37 +212,51 @@ private fun PlacementCard(state: UiState, vm: SliceViewModel) = Section("Placeme
             label = { Text("Height mm") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.width(140.dp),
+            modifier = Modifier.width(130.dp),
         )
         OutlinedButton(onClick = vm::fitToBed) { Text("Fit to bed") }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Stand upright")
-            Text(
-                "Turn this on if the model lies on its back: sculpting apps often export with Y up.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Switch(checked = state.upright, onCheckedChange = vm::setUpright)
-    }
-    if (scale == null) {
-        Text("Enter a scale above 0%.", color = MaterialTheme.colorScheme.error)
-        return@Section
-    }
-    val (w, d, h) = vm.placement(state).placedSize(model.info.bounds)
-    Text("On the bed: ${mm(w)} × ${mm(d)} × ${mm(h)} mm (width × depth × height)")
+    val b = o.bounds
     val v = vm.volume(state)
+    Text("On the bed: ${mm(b.sizeX)} × ${mm(b.sizeY)} × ${mm(b.sizeZ)} mm (width × depth × height)")
     when {
-        w > v.width || d > v.depth || h > v.height -> Text(
-            "Too big for the ${mm(v.width)} × ${mm(v.depth)} × ${mm(v.height)} mm build volume. Scale it down or use Fit to bed.",
+        !o.fits(v) -> Text(
+            if (b.sizeX > v.width || b.sizeY > v.depth || b.sizeZ > v.height)
+                "Too big for the ${mm(v.width)} × ${mm(v.depth)} × ${mm(v.height)} mm build volume. Scale it down or use Fit to bed."
+            else "Partly off the bed. Drag it back, or use Arrange.",
             color = MaterialTheme.colorScheme.error,
         )
-        maxOf(w, d, h) < 5f -> Text(
+        maxOf(b.sizeX, b.sizeY, b.sizeZ) < 5f -> Text(
             "Very small. Sculpting apps don't export in millimetres: enter the height you want, or use Fit to bed.",
             color = MaterialTheme.colorScheme.tertiary,
         )
-        else -> Text("Fits the build volume.")
+    }
+
+    Text("Rotate", style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = { vm.rotate("X", 90f) }) { Text("X 90°") }
+        FilledTonalButton(onClick = { vm.rotate("Y", 90f) }) { Text("Y 90°") }
+        FilledTonalButton(onClick = { vm.rotate("Z", 90f) }) { Text("Z 90°") }
+        FilledTonalButton(onClick = { vm.rotate("Z", 45f) }) { Text("Z 45°") }
+    }
+    Text(
+        "X 90° stands up a model that lies on its back: sculpting apps often export with Y up.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (state.layFlatMode) {
+            Button(onClick = { vm.setLayFlatMode(false) }) { Text("Cancel lay flat") }
+        } else {
+            OutlinedButton(onClick = { vm.setLayFlatMode(true) }, enabled = state.busy == null) { Text("Lay flat…") }
+        }
+        OutlinedButton(onClick = vm::resetRotation) { Text("Reset rotation") }
+    }
+    state.busy?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    if (state.layFlatMode) Text("Tap the face of the model that should rest on the bed.", style = MaterialTheme.typography.bodySmall)
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = vm::duplicateSelected) { Text("Duplicate") }
+        OutlinedButton(onClick = vm::deleteSelected) { Text("Delete") }
     }
 }
 
@@ -255,9 +304,23 @@ private fun adhesion(type: String?) = when (type) {
 
 @Composable
 private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = Section("Slice") {
-    val model = state.model ?: return@Section
-    val scale = vm.scale(state)
-    val fits = vm.fits(state)
+    val objects = state.scene.objects
+    val outside = vm.outOfBounds(state)
+    val ready = objects.isNotEmpty() && outside.isEmpty() && state.importing == null
+    Text(if (objects.size == 1) "1 object" else "${objects.size} objects, sliced together")
+    if (outside.isNotEmpty()) {
+        Text(
+            "Can't slice yet: ${outside.joinToString { it.name }} ${if (outside.size == 1) "is" else "are"} outside the build volume.",
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    val overlapping = state.scene.overlapping()
+    if (overlapping.isNotEmpty()) {
+        Text(
+            "Some objects overlap, so they'll print fused together. Use Arrange to space them out.",
+            color = MaterialTheme.colorScheme.tertiary,
+        )
+    }
     when (val s = state.slice) {
         is SliceState.Running -> {
             LinearProgressIndicator(progress = { s.stagesDone.toFloat() / s.stageCount }, Modifier.fillMaxWidth())
@@ -276,7 +339,7 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
                         "). This is a bug in MobileSlicer, so saving is turned off. Please report it.",
                     color = MaterialTheme.colorScheme.error,
                 )
-                OutlinedButton(onClick = vm::slice) { Text("Slice again") }
+                OutlinedButton(onClick = vm::slice, enabled = ready) { Text("Slice again") }
                 return@Section
             }
             Text("Sliced in ${"%.1f".format(r.sliceMillis / 1000.0)} s")
@@ -290,7 +353,7 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onSave) { Text("Save G-code") }
-                OutlinedButton(onClick = vm::slice) { Text("Slice again") }
+                OutlinedButton(onClick = vm::slice, enabled = ready) { Text("Slice again") }
             }
         }
         is SliceState.Failed -> {
@@ -307,14 +370,14 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
                     }
                 }
             }
-            Button(onClick = vm::slice, enabled = fits) { Text("Try again") }
+            Button(onClick = vm::slice, enabled = ready) { Text("Try again") }
         }
-        SliceState.Idle -> Button(onClick = vm::slice, enabled = fits && state.importing == null) { Text("Slice") }
+        SliceState.Idle -> Button(onClick = vm::slice, enabled = ready) { Text("Slice") }
     }
 }
 
 private fun stageLabel(stage: String?) = when (stage) {
-    "slice" -> "cutting the model into layers"
+    "slice" -> "cutting the models into layers"
     "layerparts" -> "finding the parts of each layer"
     "inset+skin" -> "walls and top and bottom surfaces"
     "support" -> "supports"
