@@ -78,5 +78,4 @@ The first Nomad export (about 3 mm tall, since Nomad doesn't export in millimetr
 | Date | Device | Model | Result |
 | --- | --- | --- | --- |
 | 2026-11-24 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt export ("Senhor Leite"), scaled to 28.3 mm tall | **M1 exit test passed.** Sliced end to end on the device in 2.4 s: 142 layers, 14 min 9 s, 0.69 m of filament. The G-code was checked: header filled in, safe temperatures throughout, centred on the bed, extrusion on every layer. |
-
 | 2026-11-25 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt teddy bear, 4,498,610 triangles, scaled to 64.6 mm | **M3 exit test passed.** Loaded in 0.4 s and stayed at 98–114 fps while orbiting, panning and zooming. Two fixes came out of the test: the model's base showed through the bed when seen from below, and **Fit to bed** was squeezed on a phone. |
