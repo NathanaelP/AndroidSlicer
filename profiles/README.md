@@ -61,7 +61,8 @@ python3 profiles/check_gcode.py android/engine/src/main/assets/profiles/elegoo_n
 
 A 50 mm cube (the 20 mm test cube at 250%) passes all 21 checks with each preset. Slicing the 20 mm cube at 100% also passes. Its layers are so quick that the engine slows most of them down for the minimum layer time, as Cura would, so only a few layers can be checked at full speed.
 
-Two things look like bugs but are correct:
+Three things look like bugs but are correct:
+- **Speeds above the profile's on organic models:** with `speed_equalize_flow_width_factor` at 100% (Cura's default), thinner lines print faster and wider ones slower, so the plastic flows at a constant rate. On a cube every line is the same width, but sculpts have walls of varying width. For these, `check_gcode.py` checks the volumetric flow instead: on the M4 device test it matched the profile to within 0.02 mm³/s for every feature, while speeds ranged from 49 to 297 mm/s.
 - **Infill at 62.5 mm/s:** on the layer just below the top skin, Cura 5.13 prints *skin support* at `skin_support_speed` (62.5 mm/s).
 - **Nozzle temperature change during layer 0:** the engine sends the layer-1 temperature (200 °C) near the end of layer 0, so the nozzle has cooled by the time layer 1 starts.
 
