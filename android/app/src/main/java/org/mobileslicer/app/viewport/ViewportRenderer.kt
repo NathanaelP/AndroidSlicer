@@ -105,16 +105,13 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
 
         val viewProj = Mat4.mul(s.camera.projection(width.toFloat() / height), s.camera.view())
 
-        // Bed: a filled plate pushed back slightly so the grid and the model's base draw over it.
+        // Bed: a filled plate just below Z = 0 (see BED_Z), then the grid on Z = 0.
         glUseProgram(flatProgram)
         val uMvp = glGetUniformLocation(flatProgram, "uMvp")
         val uColor = glGetUniformLocation(flatProgram, "uColor")
         glUniformMatrix4fv(uMvp, 1, false, viewProj, 0)
-        glEnable(GL_POLYGON_OFFSET_FILL)
-        glPolygonOffset(2f, 2f)
         glUniform4f(uColor, 0.20f, 0.21f, 0.23f, 1f)
         drawArrays(bedVbo, GL_TRIANGLES, 0, 6)
-        glDisable(GL_POLYGON_OFFSET_FILL)
         glUniform4f(uColor, 0.30f, 0.31f, 0.34f, 1f)
         drawArrays(gridVbo, GL_LINES, 0, gridMinorCount)
         glUniform4f(uColor, 0.42f, 0.44f, 0.48f, 1f)
@@ -215,7 +212,8 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         if (geometryFor == Triple(w, d, h)) return
         geometryFor = Triple(w, d, h)
         for (vbo in intArrayOf(bedVbo, gridVbo, volumeVbo)) if (vbo != 0) glDeleteBuffers(1, intArrayOf(vbo), 0)
-        bedVbo = buffer(floatArrayOf(0f, 0f, 0f, w, 0f, 0f, w, d, 0f, 0f, 0f, 0f, w, d, 0f, 0f, d, 0f))
+        val z = BED_Z
+        bedVbo = buffer(floatArrayOf(0f, 0f, z, w, 0f, z, w, d, z, 0f, 0f, z, w, d, z, 0f, d, z))
 
         val minor = ArrayList<Float>(); val major = ArrayList<Float>()
         fun line(list: MutableList<Float>, x0: Float, y0: Float, x1: Float, y1: Float) { list += listOf(x0, y0, 0f, x1, y1, 0f) }
@@ -292,6 +290,14 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
 
     companion object {
         private const val TAG = "ViewportRenderer"
+
+        /**
+         * The bed plate sits this far below Z = 0 (mm). The model rests exactly on
+         * Z = 0, so a plate at 0 would fight it for depth. Slightly below, the grid
+         * still draws on top from above, and from below the plate hides the model's
+         * contact patches instead of letting them show through.
+         */
+        const val BED_Z = -0.2f
 
         // Checked by tools/check_shaders.py with Khronos glslangValidator.
         const val MODEL_VS = """#version 300 es

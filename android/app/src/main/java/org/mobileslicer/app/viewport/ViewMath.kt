@@ -121,7 +121,17 @@ data class OrbitCamera(
     /** One-finger drag: [dx], [dy] in pixels on a view [viewHeight] pixels tall. */
     fun orbit(dx: Float, dy: Float, viewHeight: Float): OrbitCamera {
         val k = (PI / viewHeight).toFloat()  // dragging the full height turns half a circle
-        return copy(yaw = yaw - dx * k, pitch = (pitch + dy * k).coerceIn(MIN_PITCH, MAX_PITCH))
+        return copy(yaw = yaw - dx * k, pitch = (pitch + dy * k).coerceIn(MIN_PITCH, MAX_PITCH)).aboveBed()
+    }
+
+    /**
+     * Keeps the eye at least [MIN_EYE_HEIGHT] above the bed: the bed is opaque,
+     * so a view from underneath shows nothing useful.
+     */
+    fun aboveBed(): OrbitCamera {
+        if (eye().z >= MIN_EYE_HEIGHT) return this
+        val minPitch = kotlin.math.asin(((MIN_EYE_HEIGHT - target.z) / distance).coerceIn(-1f, 1f))
+        return copy(pitch = minPitch.coerceIn(MIN_PITCH, MAX_PITCH))
     }
 
     /** Two-finger drag: moves the target so the scene follows the fingers. */
@@ -130,15 +140,18 @@ data class OrbitCamera(
         val forward = (target - eye()).normalized()
         val right = forward.cross(Vec3(0f, 0f, 1f)).normalized()
         val up = right.cross(forward)
-        return copy(target = target - right * (dx * worldPerPixel) + up * (dy * worldPerPixel))
+        val moved = target - right * (dx * worldPerPixel) + up * (dy * worldPerPixel)
+        // The target never goes below the bed, so the eye can always stay above it.
+        return copy(target = Vec3(moved.x, moved.y, maxOf(0f, moved.z))).aboveBed()
     }
 
     /** Pinch: [factor] > 1 zooms in. */
     fun zoom(factor: Float): OrbitCamera =
-        if (factor <= 0f || !factor.isFinite()) this else copy(distance = (distance / factor).coerceIn(MIN_DISTANCE, MAX_DISTANCE))
+        if (factor <= 0f || !factor.isFinite()) this else copy(distance = (distance / factor).coerceIn(MIN_DISTANCE, MAX_DISTANCE)).aboveBed()
 
     companion object {
-        const val MIN_PITCH = -0.35f   // a little below the bed, to peek at overhangs
+        const val MIN_PITCH = -0.35f   // a little below level, when the target is high enough
+        const val MIN_EYE_HEIGHT = 1f  // mm above the bed
         const val MAX_PITCH = 1.55f    // nearly straight down
         const val MIN_DISTANCE = 5f
         const val MAX_DISTANCE = 3000f

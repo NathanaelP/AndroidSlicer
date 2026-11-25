@@ -26,8 +26,9 @@ Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, wit
 
 An OpenGL ES 3.0 view of the bed (235 × 230 mm, 10 mm grid with heavier lines every 50 mm), the build-volume outline and the model.
 
-- **Gestures:** one finger orbits, two fingers pan and pinch to zoom, and a double tap or **Fit view** frames the model. Each newly opened model is framed automatically.
+- **Gestures:** one finger orbits, two fingers pan and pinch to zoom, and a double tap or **Fit view** frames the model. Each newly opened model is framed automatically. The camera stays at least 1 mm above the bed: the bed is opaque, so a view from underneath shows nothing.
 - **Placement:** the model is drawn exactly where CuraEngine will put it, using `modelMatrix()`. That is the same scale and stand-upright transform the engine receives, then centred on the bed and resting on it. It turns red when it doesn't fit the build volume.
+- **The bed** sits 0.2 mm below Z = 0 (`BED_Z`), so a model resting on Z = 0 never fights it for depth. An earlier version pushed the bed back with a polygon offset instead, which let the model's contact patches show through the bed from below.
 - **Rendering:**
   - The model is uploaded once, streamed in chunks from the importer's STL. Only positions are stored (36 bytes per triangle, about 72 MB for 2 million triangles).
   - The fragment shader computes flat-shading normals from screen-space derivatives.
@@ -77,3 +78,5 @@ The first Nomad export (about 3 mm tall, since Nomad doesn't export in millimetr
 | Date | Device | Model | Result |
 | --- | --- | --- | --- |
 | 2026-11-24 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt export ("Senhor Leite"), scaled to 28.3 mm tall | **M1 exit test passed.** Sliced end to end on the device in 2.4 s: 142 layers, 14 min 9 s, 0.69 m of filament. The G-code was checked: header filled in, safe temperatures throughout, centred on the bed, extrusion on every layer. |
+
+| 2026-11-25 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt teddy bear, 4,498,610 triangles, scaled to 64.6 mm | **M3 exit test passed.** Loaded in 0.4 s and stayed at 98–114 fps while orbiting, panning and zooming. Two fixes came out of the test: the model's base showed through the bed when seen from below, and **Fit to bed** was squeezed on a phone. |

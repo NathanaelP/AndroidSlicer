@@ -31,6 +31,8 @@ class ViewportScenesTest {
             Scene("ybox-as-exported", OrbitCamera.framing(w, d, Placement(2f).placedSize(ybox), yaw = -1.1f, pitch = 0.45f), "ybox", ybox, Placement(2f), "amber"),
             Scene("ybox-upright", OrbitCamera.framing(w, d, Placement(2f, true).placedSize(ybox), yaw = -1.1f, pitch = 0.45f), "ybox", ybox, Placement(2f, true), "amber"),
             Scene("too-big", overview, "cube", cube, Placement(13f), "red"),
+            // Dragged down as far as it goes: the camera stops just above the bed.
+            Scene("cube-lowest-view", OrbitCamera.framing(w, d, Placement().placedSize(cube), yaw = -1.1f, pitch = 0.45f).orbit(0f, -100000f, 800f), "cube", cube, Placement(), "amber"),
             Scene("sphere-close", OrbitCamera(Vec3(w / 2, d / 2, 40f), 160f, yaw = -1.2f, pitch = 0.35f), "sphere", Bounds(-40f, -40f, -40f, 40f, 40f, 40f), Placement(), "amber"),
         )
         val json = scenes.joinToString(",\n", "[\n", "\n]") { s ->

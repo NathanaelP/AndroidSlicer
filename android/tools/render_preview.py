@@ -78,7 +78,7 @@ try {
   const model = prog(S.MODEL_VS, S.MODEL_FS), flat = prog(S.FLAT_VS, S.FLAT_FS);
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
   gl.clearColor(0.11, 0.11, 0.13, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  const bed = buf(new Float32Array([0,0,0, w,0,0, w,d,0, 0,0,0, w,d,0, 0,d,0]));
+  const z = -0.2; const bed = buf(new Float32Array([0,0,z, w,0,z, w,d,z, 0,0,z, w,d,z, 0,d,z]));
   const minor = [], major = [];
   for (let x = 0; x <= w + 0.01; x += 10) (Math.trunc(x) %% 50 === 0 ? major : minor).push(x,0,0, x,d,0);
   for (let y = 0; y <= d + 0.01; y += 10) (Math.trunc(y) %% 50 === 0 ? major : minor).push(0,y,0, w,y,0);
@@ -90,9 +90,7 @@ try {
   gl.useProgram(flat);
   const uMvp = gl.getUniformLocation(flat, 'uMvp'), uColor = gl.getUniformLocation(flat, 'uColor');
   gl.uniformMatrix4fv(uMvp, false, vp);
-  gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 2);
   gl.uniform4f(uColor, 0.20, 0.21, 0.23, 1); draw(bed, gl.TRIANGLES, 0, 6);
-  gl.disable(gl.POLYGON_OFFSET_FILL);
   gl.uniform4f(uColor, 0.30, 0.31, 0.34, 1); draw(grid, gl.LINES, 0, minor.length / 3);
   gl.uniform4f(uColor, 0.42, 0.44, 0.48, 1); draw(grid, gl.LINES, minor.length / 3, major.length / 3);
   gl.uniform4f(uColor, 0.45, 0.62, 0.85, 1); draw(vol, gl.LINES, 0, 24);

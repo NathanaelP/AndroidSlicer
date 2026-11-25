@@ -60,6 +60,20 @@ class ViewMathTest {
         assertEquals(0f, (panned.target - cam.target).dot(cam.target - cam.eye()), 1e-3f) // perpendicular to the view
     }
 
+    @Test fun cameraStaysAboveTheBed() {
+        val cam = OrbitCamera(Vec3(100f, 100f, 10f), 60f, yaw = 0f, pitch = 0.3f)
+        // Dragging down as far as possible stops with the eye just above the bed.
+        val low = cam.orbit(0f, -100000f, 1000f)
+        assertEquals(OrbitCamera.MIN_EYE_HEIGHT, low.eye().z, 1e-3f)
+        // Zooming out from a low view doesn't take the eye under the bed either.
+        assertTrue(low.zoom(0.25f).eye().z >= OrbitCamera.MIN_EYE_HEIGHT - 1e-3f)
+        // Panning the target down to the bed keeps the eye above it.
+        assertTrue(low.pan(0f, -100000f, 1000f).eye().z >= OrbitCamera.MIN_EYE_HEIGHT - 1e-3f)
+        // With a tall target the camera may look up from slightly below level.
+        val tall = OrbitCamera(Vec3(100f, 100f, 100f), 60f, yaw = 0f, pitch = 0.3f).orbit(0f, -100000f, 1000f)
+        assertEquals(OrbitCamera.MIN_PITCH, tall.pitch, 1e-6f)
+    }
+
     @Test fun overviewSeesTheWholeVolume() {
         val cam = OrbitCamera.overview(235f, 230f, 270f)
         val clip = Mat4.mul(cam.projection(1f), cam.view())
