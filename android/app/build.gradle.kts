@@ -12,8 +12,8 @@ android {
         applicationId = "org.mobileslicer.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.5.2-m5"
+        versionCode = 10
+        versionName = "0.5.3-m5"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -46,4 +46,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
+}
+
+// Desktop unit tests use the host build of the native simplifier when there is
+// one (engine/build-simplifier.sh host); tests that need it are skipped otherwise.
+tasks.withType<Test>().configureEach {
+    val work = System.getenv("WORK") ?: "${System.getProperty("user.home")}/mobileslicer-build"
+    val lib = File(work, "host/bin/libmeshsimplify.so")
+    if (lib.exists()) systemProperty("mobileslicer.simplifier", lib.path)
 }

@@ -13,6 +13,9 @@ engine/fetch-sources.sh                    # ~430 MB into ~/mobileslicer-build/s
 engine/build.sh host                       # desktop reference build (~3 min on 4 cores)
 ANDROID_NDK_HOME=/path/to/android-ndk-r29 \
   engine/build.sh android-arm64            # arm64-v8a build
+ANDROID_NDK_HOME=/path/to/android-ndk-r29 \
+  engine/build-simplifier.sh android-arm64 # the app's mesh simplifier (M5)
+engine/build-simplifier.sh host            # the same for desktop unit tests
 ```
 
 Results go to `~/mobileslicer-build/<target>/bin/`. Set `WORK` to build somewhere else.
@@ -31,6 +34,8 @@ engine/test/slice-cube.sh ~/mobileslicer-build/host/bin/CuraEngine \
 | `versions.env` | Every source and its pinned tag, commit or checksum |
 | `fetch-sources.sh` | Fetches all sources at those versions |
 | `build.sh` | Builds the dependencies, then CuraEngine, for `host` or `android-arm64` |
+| `build-simplifier.sh` | Builds `libmeshsimplify.so` (`jni/meshsimplify.cpp` plus meshoptimizer's simplifier) for `host`, `android-arm64`, or as a `cli` tool for timing |
+| `jni/meshsimplify.cpp` | Reads, welds, simplifies and writes a binary STL in native memory, for `NativeSimplifier` |
 | `cmake/shims/` | Stand-ins for the CMake package files Conan would generate |
 | `test/cube20.stl` | 20 mm test cube |
 | `test/m0-settings.txt` | Settings for the M0 test slice (rough Neptune 4 Pro values) |

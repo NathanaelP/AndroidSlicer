@@ -82,6 +82,7 @@ git_fetch mapbox-variant  "$MAPBOX_VARIANT_REPO"  "$MAPBOX_VARIANT_REF"
 git_fetch onetbb          "$ONETBB_REPO"          "$ONETBB_REF"
 git_fetch zlib            "$ZLIB_REPO"            "$ZLIB_REF"
 git_fetch libpng          "$LIBPNG_REPO"          "$LIBPNG_REF"
+git_fetch meshoptimizer   "$MESHOPTIMIZER_REPO"   "$MESHOPTIMIZER_REF"
 
 url_fetch boost.tar.bz2 "$BOOST_URL"   "$BOOST_SHA256"
 url_fetch clipper.zip   "$CLIPPER_URL" "$CLIPPER_SHA256"

@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.mobileslicer.app.SliceState
 import org.mobileslicer.app.SliceViewModel
+import org.mobileslicer.app.scene.unitGuesses
 import org.mobileslicer.app.UiState
 import org.mobileslicer.app.viewport.Viewport
 import java.util.Locale
@@ -233,9 +234,18 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
             color = MaterialTheme.colorScheme.error,
         )
         maxOf(b.sizeX, b.sizeY, b.sizeZ) < 5f -> Text(
-            "Very small. Sculpting apps don't export in millimetres: enter the height you want, or use Fit to bed.",
+            "Very small. The file may not be in millimetres: sculpting and CAD apps often export in other units. " +
+                "Pick one below, enter the height you want, or use Fit to bed.",
             color = MaterialTheme.colorScheme.tertiary,
         )
+    }
+    val guesses = o.unitGuesses(v)
+    if (guesses.isNotEmpty()) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            guesses.forEach { g ->
+                FilledTonalButton(onClick = { vm.scaleUnits(g.factor) }) { Text("In ${g.unit} (${mm(g.heightMm)} mm tall)") }
+            }
+        }
     }
 
     if (o.floating.isNotEmpty()) {
@@ -248,6 +258,7 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
     }
 
     MeshCheck(o, state, vm)
+    SimplifyTools(o, state, vm)
 
     Text("Rotate", style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -434,8 +445,8 @@ private fun MeshCheck(o: org.mobileslicer.app.scene.SceneObject, state: UiState,
                         "but walls may have gaps there."
                 )
                 if (h.nonManifoldEdges > 0) add(
-                    "${count(h.nonManifoldEdges, "edge")} shared by more than two faces (doubled or overlapping faces). " +
-                        "This usually slices fine."
+                    "${count(h.nonManifoldEdges, "edge")} shared by more than two faces (doubled or overlapping faces" +
+                        (if (o.mesh.simplifiedFrom > 0) ", or pinched by simplifying" else "") + "). This usually slices fine."
                 )
                 if (h.flippedEdges > 0) add(
                     "${count(h.flippedEdges, "edge")} between faces pointing opposite ways (some faces are inside out). " +
@@ -451,6 +462,37 @@ private fun MeshCheck(o: org.mobileslicer.app.scene.SceneObject, state: UiState,
         }
     }
 }
+
+/** Simplify, for dense meshes; and how much simplifying has already done. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SimplifyTools(o: org.mobileslicer.app.scene.SceneObject, state: UiState, vm: SliceViewModel) {
+    val m = o.mesh
+    if (m.simplifiedFrom > 0) {
+        Text(
+            "Simplified from %,d triangles; the surface moved by at most %s mm at this size."
+                .format(m.simplifiedFrom, mm3(m.simplifyError * o.transform.scale)),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (m.triangles < SIMPLIFY_FROM) return
+    Text("Simplify", style = MaterialTheme.typography.labelLarge)
+    Text(
+        "%,d triangles. Fewer make slicing and the view faster. The surface stays within the distance you pick; ".format(m.triangles) +
+            "0.02 mm is far below what the printer can show.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (t in listOf(0.01f, 0.02f, 0.05f)) {
+            OutlinedButton(onClick = { vm.simplifySelected(t) }, enabled = state.busy == null) { Text("Within ${mm3(t)} mm") }
+        }
+    }
+}
+
+/** Offered from this many triangles. */
+private const val SIMPLIFY_FROM = 200_000L
+
+private fun mm3(v: Float) = String.format(java.util.Locale.ROOT, "%.3f", v).trimEnd('0').trimEnd('.').ifEmpty { "0" }
 
 private fun count(n: Int, noun: String) = "%,d %s".format(n, if (n == 1) noun else noun + "s")
 

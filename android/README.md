@@ -61,6 +61,24 @@ tools/slice_broken.sh
 
 All of them slice without crashing. The only empty result is the box with a missing wall: no layer has a closed outline, even with stitching. After Fill holes it slices to 100 layers. In the app, that case now gives the message above. Filling the cut sphere's holes gives it a closed top and side again (81,698 extrusion moves, against 69,386 open).
 
+## Mesh health (M5): dense meshes and units
+
+- **Native simplifier:** `libmeshsimplify.so` is meshoptimizer 1.2's simplifier plus a small JNI wrapper, `engine/jni/meshsimplify.cpp`. It reads a binary STL, welds it, simplifies it and writes the result, all in native memory, so dense sculpts never touch the Java heap. Hole rims are locked, so Fill holes still works afterwards. Triangles left back to back are dropped: same-facing duplicates keep one, and opposite pairs cancel. The surface error is in absolute units, and the app works it out from a distance in mm at the object's current scale.
+- **Simplified on import:** meshes over 6 million triangles are thinned to 3 million before anything else reads them. The surface may move by at most 0.2% of the model's diagonal, and in practice by far less. The app says how many triangles the file had, and the object's card says how far the surface moved.
+- **Simplify button:** offered from 200,000 triangles, with tolerances of 0.01, 0.02 or 0.05 mm at the object's size. It's one undo step.
+- **Units:** a model under 5 mm across, still at 100%, gets one-tap guesses of centimetres, inches or metres. A guess is offered only when the result is at least 10 mm and fits the build volume.
+- **Running out of memory** while reading a file now gives a message instead of crashing the app.
+
+### Exit test, dense half (desktop)
+
+| | Triangles | Time | Peak memory | Result |
+| --- | --- | --- | --- | --- |
+| A 12-million-triangle bumpy sculpt (600 MB STL), imported the app's way with a 512 MB Java heap | 12,000,100 → 2,998,586 | 15 s | native simplifier 1.37 GB (measured on the command-line build) | Closed; surface moved at most 0.0095 mm |
+| Sliced as imported (3 million) | | 29 s | engine 0.86 GB | 576 layers, 3 h 34 min, 64,863 mm³ |
+| Sliced at the original 12 million | | 62 s | engine 2.8 GB | 576 layers, 3 h 34 min, 64,868 mm³ |
+
+The two G-code files print the same, to within 13 s and 5 mm³ of filament, but the engine needs about a third of the memory for the simplified mesh. Both pass 20 of 21 checks against the Normal profile. The one miss is the fan check: this test blob rests on a point, so its first layer takes almost no time to print, and the engine's minimum-layer-time cooling runs the fan at about 20% on it, as desktop Cura does. Models with a real base pass it. Simplifying a 2-million-triangle version of the same shape stays clean at 0.001 and 0.005 mm. At about 0.01 mm a few edges (3 here, 34 on the 12-million-triangle mesh) end up shared by more than two faces, which the mesh check reports and the engine slices fine.
+
 ## Several objects (M4)
 
 - **Objects:**

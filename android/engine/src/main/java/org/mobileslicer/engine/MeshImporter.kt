@@ -38,6 +38,10 @@ data class MeshInfo(
     val samples: FloatArray = FloatArray(0),
     /** The mesh's connected parts, largest first; their triangles sit together in [stl]. */
     val parts: List<MeshPart> = listOf(MeshPart(0, triangles.toInt(), bounds, 0, samples.size / 3)),
+    /** Triangles in the file before it was simplified on import or by the user; 0 if it wasn't. */
+    val simplifiedFrom: Long = 0,
+    /** How far, at most, simplifying moved the surface (mesh units). */
+    val simplifyError: Float = 0f,
 ) {
     /** The edge check over all parts. */
     val health: PartHealth by lazy { parts.fold(PartHealth()) { a, p -> a + p.health } }
@@ -60,22 +64,51 @@ object MeshImporter {
     /** Called with the number of input bytes read so far. */
     fun interface Progress { fun onBytes(read: Long) }
 
-    fun import(input: InputStream, fileName: String, out: File, progress: Progress = Progress {}, onAnalysing: () -> Unit = {}): MeshInfo {
+    fun import(
+        input: InputStream,
+        fileName: String,
+        out: File,
+        progress: Progress = Progress {},
+        onAnalysing: () -> Unit = {},
+        onSimplifying: (triangles: Long) -> Unit = {},
+    ): MeshInfo {
         // Convert to a plain binary STL first, then group its triangles by connected part.
         val raw = File(out.parentFile, out.name + ".raw")
+        val thin = File(out.parentFile, out.name + ".thin")
         try {
-            val info = convert(input, fileName, raw, progress)
+            var info = convert(input, fileName, raw, progress)
+            var source = raw
+            if (info.triangles > AUTO_SIMPLIFY_ABOVE && NativeSimplifier.available) {
+                // Too dense to show, check and slice comfortably on a phone: thin it out
+                // first, in native memory. The surface moves by a tiny fraction of the
+                // model's size; the error reached is kept so the app can say how much.
+                onSimplifying(info.triangles)
+                val b = info.bounds
+                val diag = kotlin.math.sqrt(b.sizeX * b.sizeX + b.sizeY * b.sizeY + b.sizeZ * b.sizeZ)
+                val (n, error) = MeshSimplifier.simplifyFile(raw, thin, diag * AUTO_SIMPLIFY_MAX_ERROR, AUTO_SIMPLIFY_TARGET)
+                raw.delete()
+                info = info.copy(triangles = n.toLong(), bounds = MeshParts.boundsOf(thin, n), simplifiedFrom = info.triangles, simplifyError = error)
+                source = thin
+            }
             if (info.triangles > Int.MAX_VALUE / 50) throw MeshImportException("The mesh has too many triangles.")
             onAnalysing()
-            val grouped = MeshParts.group(raw, out, info.triangles.toInt(), info.bounds)
+            val grouped = MeshParts.group(source, out, info.triangles.toInt(), info.bounds)
             return info.copy(stl = out, samples = grouped.samples, parts = grouped.parts)
         } catch (e: Exception) {
             out.delete()  // no half-written output
             throw e
         } finally {
             raw.delete()
+            thin.delete()
         }
     }
+
+    /** Meshes above this many triangles are simplified on import (when the native simplifier is there). */
+    const val AUTO_SIMPLIFY_ABOVE = 6_000_000L
+    /** ...down to this many, */
+    const val AUTO_SIMPLIFY_TARGET = 3_000_000L
+    /** ...unless that would move the surface by more than this fraction of the model's diagonal. */
+    const val AUTO_SIMPLIFY_MAX_ERROR = 0.002f
 
     private fun convert(input: InputStream, fileName: String, out: File, progress: Progress): MeshInfo {
         val counting = CountingInputStream(BufferedInputStream(input, 1 shl 16), progress)

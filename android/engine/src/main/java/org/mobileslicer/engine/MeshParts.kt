@@ -265,6 +265,19 @@ object MeshParts {
         return mesh.copy(stl = dst, triangles = triangles.toLong(), bounds = bounds, skippedTriangles = 0, samples = samples, parts = parts)
     }
 
+    /** Exact bounds of the triangles in binary STL [stl]. */
+    fun boundsOf(stl: File, triangles: Int): Bounds {
+        val lo = floatArrayOf(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE)
+        val hi = floatArrayOf(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
+        forEachTriangle(stl, triangles) { _, buf, o ->
+            for (k in 0 until 9) {
+                val v = buf.getFloat(o + 12 + 4 * k)
+                lo[k % 3] = min(lo[k % 3], v); hi[k % 3] = max(hi[k % 3], v)
+            }
+        }
+        return Bounds(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2])
+    }
+
     /** Calls [action] with each triangle's index and its 50-byte record (in [buf] at offset). */
     private inline fun forEachTriangle(stl: File, triangles: Int, action: (t: Int, buf: ByteBuffer, offset: Int) -> Unit) {
         val chunk = 8192

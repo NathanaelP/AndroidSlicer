@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Copy the arm64 engine build and Cura's setting definitions into the :engine
-# module, ready for ./gradlew assembleRelease. Run engine/fetch-sources.sh and
-# engine/build.sh android-arm64 first (see engine/README.md).
+# module, ready for ./gradlew assembleRelease. Run engine/fetch-sources.sh,
+# engine/build.sh android-arm64 and engine/build-simplifier.sh android-arm64
+# first (see engine/README.md).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -20,6 +21,8 @@ mkdir -p "$LIBS" "$DEFS"
 # folder, the one place apps may run binaries from; hence the engine's new name.
 "$STRIP" -o "$LIBS/libcuraengine.so" "$BIN/CuraEngine"
 "$STRIP" -o "$LIBS/libtbb.so" "$BIN/libtbb.so"
+# The mesh simplifier (engine/build-simplifier.sh android-arm64), loaded through JNI.
+"$STRIP" -o "$LIBS/libmeshsimplify.so" "$BIN/libmeshsimplify.so"
 cp "$BIN/libc++_shared.so" "$LIBS/"
 cp "$WORK/src/cura/resources/definitions/fdmprinter.def.json" \
    "$WORK/src/cura/resources/definitions/fdmextruder.def.json" "$DEFS/"

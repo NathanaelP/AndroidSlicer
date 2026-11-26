@@ -19,3 +19,11 @@ dependencies {
     // Android's org.json is only a stub in local unit tests; use the real library there.
     testImplementation("org.json:json:20250517")
 }
+
+// Desktop unit tests use the host build of the native simplifier when there is
+// one (engine/build-simplifier.sh host); tests that need it are skipped otherwise.
+tasks.withType<Test>().configureEach {
+    val work = System.getenv("WORK") ?: "${System.getProperty("user.home")}/mobileslicer-build"
+    val lib = File(work, "host/bin/libmeshsimplify.so")
+    if (lib.exists()) systemProperty("mobileslicer.simplifier", lib.path)
+}
