@@ -158,6 +158,97 @@ object MeshParts {
         return PartsResult(parts, samples)
     }
 
+    /**
+     * Groups [mesh]'s parts into pieces whose surfaces come within [gap] (in the
+     * mesh's own units) of each other, so pieces that touch, rest on or push into
+     * each other stay together. Works on the sample points, so the real reach is
+     * [gap] plus about one sample spacing. Each group lists part indices in order;
+     * groups are ordered by their first part (largest first).
+     */
+    fun touchingGroups(mesh: MeshInfo, gap: Float): List<List<Int>> {
+        val parts = mesh.parts
+        if (parts.size < 2) return listOf(parts.indices.toList())
+        val b = mesh.bounds
+        val diag = sqrt(b.sizeX * b.sizeX + b.sizeY * b.sizeY + b.sizeZ * b.sizeZ)
+        // Points are at most one fill spacing apart on a surface, so two surfaces
+        // closer than [gap] have points within gap + spacing of each other.
+        val reach = gap + maxOf(diag / SURFACE_POINTS_PER_DIAGONAL, 1e-6f)
+        val s = mesh.samples
+        val n = s.size / 3
+        val partOf = IntArray(n)
+        for ((i, p) in parts.withIndex()) for (k in p.sampleStart until p.sampleStart + p.sampleCount) partOf[k] = i
+
+        // Bucket the points on a grid of [reach] cells: neighbours are in the 27 cells around.
+        fun cell(v: Float, lo: Float) = ((v - lo) / reach).toInt()
+        fun key(ix: Int, iy: Int, iz: Int) = (ix.toLong() shl 42) or (iy.toLong() shl 21) or iz.toLong()
+        val keys = LongArray(n) { key(cell(s[3 * it], b.minX), cell(s[3 * it + 1], b.minY), cell(s[3 * it + 2], b.minZ)) }
+        val order = (0 until n).sortedBy { keys[it] }.toIntArray()
+        val sortedKeys = LongArray(n) { keys[order[it]] }
+
+        val root = IntArray(parts.size) { it }
+        fun find(v: Int): Int { var r = v; while (root[r] != r) r = root[r]; var c = v; while (root[c] != r) { val nx = root[c]; root[c] = r; c = nx }; return r }
+        val r2 = reach * reach
+        for (i in 0 until n) {
+            val ix = cell(s[3 * i], b.minX); val iy = cell(s[3 * i + 1], b.minY); val iz = cell(s[3 * i + 2], b.minZ)
+            for (ox in -1..1) for (oy in -1..1) for (oz in -1..1) {
+                if (ix + ox < 0 || iy + oy < 0 || iz + oz < 0) continue
+                val k = key(ix + ox, iy + oy, iz + oz)
+                var at = java.util.Arrays.binarySearch(sortedKeys, k)
+                if (at < 0) continue
+                while (at > 0 && sortedKeys[at - 1] == k) at--
+                while (at < n && sortedKeys[at] == k) {
+                    val j = order[at++]
+                    if (partOf[j] == partOf[i] || find(partOf[j]) == find(partOf[i])) continue
+                    val dx = s[3 * i] - s[3 * j]; val dy = s[3 * i + 1] - s[3 * j + 1]; val dz = s[3 * i + 2] - s[3 * j + 2]
+                    if (dx * dx + dy * dy + dz * dz <= r2) root[find(partOf[j])] = find(partOf[i])
+                }
+            }
+        }
+        return parts.indices.groupBy { find(it) }.values.sortedBy { it.first() }
+    }
+
+    /**
+     * Writes the triangles of parts [indices] of [mesh] to [dst] as a mesh of its
+     * own, with its parts, bounds and sample points carried over.
+     */
+    fun extract(mesh: MeshInfo, indices: List<Int>, dst: File): MeshInfo {
+        val picked = indices.map { mesh.parts[it] }
+        val triangles = picked.sumOf { it.triangles }
+        val points = picked.sumOf { it.sampleCount }
+        val samples = FloatArray(3 * points)
+        val parts = ArrayList<MeshPart>(picked.size)
+        var tri = 0
+        var pt = 0
+        RandomAccessFile(dst, "rw").use { raf: RandomAccessFile ->
+            raf.setLength(0)
+            val header = ByteArray(84)
+            "MobileSlicer split".toByteArray().copyInto(header)
+            ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).putInt(80, triangles)
+            raf.write(header)
+            RandomAccessFile(mesh.stl, "r").use { src: RandomAccessFile ->
+                val buf = ByteArray(50 * 8192)
+                for (p in picked) {
+                    src.seek(84L + 50L * p.firstTriangle)
+                    var left = 50L * p.triangles
+                    while (left > 0) {
+                        val n = minOf(buf.size.toLong(), left).toInt()
+                        src.readFully(buf, 0, n)
+                        raf.write(buf, 0, n)
+                        left -= n
+                    }
+                    mesh.samples.copyInto(samples, 3 * pt, 3 * p.sampleStart, 3 * (p.sampleStart + p.sampleCount))
+                    parts += p.copy(firstTriangle = tri, sampleStart = pt)
+                    tri += p.triangles
+                    pt += p.sampleCount
+                }
+            }
+        }
+        val bounds = picked.map { it.bounds }.reduce { a, c ->
+            Bounds(min(a.minX, c.minX), min(a.minY, c.minY), min(a.minZ, c.minZ), max(a.maxX, c.maxX), max(a.maxY, c.maxY), max(a.maxZ, c.maxZ))
+        }
+        return mesh.copy(stl = dst, triangles = triangles.toLong(), bounds = bounds, skippedTriangles = 0, samples = samples, parts = parts)
+    }
+
     /** Calls [action] with each triangle's index and its 50-byte record (in [buf] at offset). */
     private inline fun forEachTriangle(stl: File, triangles: Int, action: (t: Int, buf: ByteBuffer, offset: Int) -> Unit) {
         val chunk = 8192

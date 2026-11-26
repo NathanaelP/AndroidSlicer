@@ -269,6 +269,15 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = vm::duplicateSelected) { Text("Duplicate") }
         OutlinedButton(onClick = vm::deleteSelected) { Text("Delete") }
+        if (o.mesh.parts.size > 1) {
+            OutlinedButton(onClick = vm::splitSelected, enabled = state.busy == null) { Text("Split into parts") }
+        }
+    }
+    if (o.mesh.parts.size > 1) {
+        Text(
+            "Split makes each separate piece its own object. Parts that touch stay together.",
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

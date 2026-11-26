@@ -80,4 +80,43 @@ class MeshPartsTest {
         assertEquals(1, info.parts.size)
         assertEquals(n, info.parts[0].triangles)
     }
+
+    @Test fun touchingPartsGroupTogether() {
+        // A figure's two parts (a body and an arm pushed into it), a hat resting on the
+        // body, and a loose piece well away: the loose piece is its own group.
+        val obj = box(0, 0f, 0f, 0f, 10f, 10f, 30f) +       // body
+            box(8, 8f, 4f, 15f, 16f, 6f, 17f) +             // arm, pushed into the body
+            box(16, 2f, 2f, 30f, 8f, 8f, 33f) +             // hat, resting on the body
+            box(24, 40f, 0f, 0f, 44f, 4f, 4f)               // loose, 30 mm away
+        val info = MeshImporter.import(ByteArrayInputStream(obj.toByteArray()), "fig.obj", tmp.newFile("f.stl"))
+        assertEquals(4, info.parts.size)
+        val groups = MeshParts.touchingGroups(info, gap = 0.3f)
+        assertEquals(2, groups.size)
+        val loose = info.parts.indexOfFirst { it.bounds.minX == 40f }
+        assertEquals(listOf(loose), groups.single { loose in it })
+        assertEquals(3, groups.single { loose !in it }.size)
+    }
+
+    @Test fun extractCopiesPartsIntoTheirOwnMesh() {
+        val obj = box(0, -10f, -10f, 0f, 10f, 10f, 20f) + box(8, 4f, 4f, 60f, 10f, 10f, 66f) + box(16, 30f, 0f, 0f, 31f, 1f, 1f)
+        val info = MeshImporter.import(ByteArrayInputStream(obj.toByteArray()), "three.obj", tmp.newFile("m.stl"))
+        val all = trianglesOf(info.stl)
+        val pieces = info.parts.indices.map { i -> MeshParts.extract(info, listOf(i), tmp.newFile("p$i.stl")) }
+        for ((i, piece) in pieces.withIndex()) {
+            val p = info.parts[i]
+            assertEquals(p.triangles.toLong(), piece.triangles)
+            assertEquals(p.bounds, piece.bounds)
+            assertEquals(listOf(MeshPart(0, p.triangles, p.bounds, 0, p.sampleCount)), piece.parts)
+            assertEquals(all.subList(p.firstTriangle, p.firstTriangle + p.triangles), trianglesOf(piece.stl))
+            assertEquals(
+                info.samples.copyOfRange(3 * p.sampleStart, 3 * (p.sampleStart + p.sampleCount)).toList(),
+                piece.samples.toList(),
+            )
+        }
+        // Two parts together keep both, one after the other.
+        val two = MeshParts.extract(info, listOf(0, 2), tmp.newFile("two.stl"))
+        assertEquals(2, two.parts.size)
+        assertEquals(info.parts[0].triangles, two.parts[1].firstTriangle)
+        assertEquals(Bounds(-10f, -10f, 0f, 31f, 10f, 20f), two.bounds)
+    }
 }

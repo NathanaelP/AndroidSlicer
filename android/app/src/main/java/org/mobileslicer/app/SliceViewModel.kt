@@ -22,6 +22,9 @@ import org.mobileslicer.app.scene.SceneObject
 import org.mobileslicer.app.scene.arrange
 import org.mobileslicer.app.scene.pickFaceNormal
 import org.mobileslicer.app.scene.placeNew
+import org.mobileslicer.app.scene.splitGroups
+import org.mobileslicer.app.scene.splitInto
+import org.mobileslicer.engine.MeshParts
 import org.mobileslicer.engine.EngineException
 import org.mobileslicer.engine.EngineRunner
 import org.mobileslicer.engine.MeshImporter
@@ -222,6 +225,48 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         val id = _state.value.scene.selectedId ?: return
         history.breakMerge()
         edit { s -> Scene(s.objects.filter { it.id != id }, null) }
+    }
+
+    /**
+     * Splits the selected object into one object per group of touching parts,
+     * as one undoable step. Pieces stay where they were over the bed and drop
+     * onto it.
+     */
+    fun splitSelected() {
+        val o = _state.value.scene.selected ?: return
+        if (_state.value.busy != null) return
+        _state.update { it.copy(busy = "Splitting…", layFlatMode = false) }
+        viewModelScope.launch {
+            val pieces = try {
+                val groups = withContext(Dispatchers.Default) { o.splitGroups() }
+                if (groups.size < 2) emptyList()
+                else {
+                    val ids = groups.map { nextId++ }
+                    withContext(Dispatchers.IO) {
+                        o.splitInto(groups.mapIndexed { i, g -> MeshParts.extract(o.mesh, g, File(workDir, "mesh-${ids[i]}.stl")) }, ids)
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(busy = null, message = "Couldn't split ${o.name}: ${e.message}") }
+                return@launch
+            }
+            _state.update { it.copy(busy = null) }
+            if (pieces.isEmpty()) {
+                _state.update { it.copy(message = "All of ${o.name}'s parts touch each other, so it stays one object.") }
+                return@launch
+            }
+            history.breakMerge()
+            edit { s ->
+                val at = s.objects.indexOfFirst { it.id == o.id }
+                if (at < 0) return@edit s
+                val objects = s.objects.subList(0, at) + pieces + s.objects.subList(at + 1, s.objects.size)
+                Scene(objects, pieces.first().id)
+            }
+            val overlap = _state.value.scene.overlapping().any { (a, b) -> a in pieces || b in pieces }
+            _state.update {
+                it.copy(message = "Split into ${pieces.size} objects." + if (overlap) " Some overlap: tap Arrange to space them out." else "")
+            }
+        }
     }
 
     fun arrangeAll() {
