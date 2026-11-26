@@ -39,7 +39,10 @@ class MeshPartsTest {
         assertEquals(36, info.triangles)
         assertEquals(2, info.parts.size)
         val (big, small) = info.parts
-        assertEquals(MeshPart(0, 24, Bounds(-10f, -10f, 0f, 10f, 10f, 20f), big.sampleStart, big.sampleCount), big)
+        assertEquals(MeshPart(0, 24, Bounds(-10f, -10f, 0f, 10f, 10f, 20f), big.sampleStart, big.sampleCount), big.copy(health = PartHealth()))
+        // Every face of the big cube is written twice: its 12 edges and 6 face diagonals are each shared by 4 triangles.
+        assertEquals(18, big.health.nonManifoldEdges)
+        assert(small.health.clean)
         assertEquals(24, small.firstTriangle); assertEquals(12, small.triangles)
         assertEquals(Bounds(50f, 50f, 70f, 54f, 54f, 74f), small.bounds)
         // Each part has its own samples, and the triangles in each part's range are that part's.
@@ -106,7 +109,7 @@ class MeshPartsTest {
             val p = info.parts[i]
             assertEquals(p.triangles.toLong(), piece.triangles)
             assertEquals(p.bounds, piece.bounds)
-            assertEquals(listOf(MeshPart(0, p.triangles, p.bounds, 0, p.sampleCount)), piece.parts)
+            assertEquals(listOf(MeshPart(0, p.triangles, p.bounds, 0, p.sampleCount, p.health)), piece.parts)
             assertEquals(all.subList(p.firstTriangle, p.firstTriangle + p.triangles), trianglesOf(piece.stl))
             assertEquals(
                 info.samples.copyOfRange(3 * p.sampleStart, 3 * (p.sampleStart + p.sampleCount)).toList(),

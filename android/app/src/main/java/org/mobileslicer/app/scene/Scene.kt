@@ -59,7 +59,15 @@ data class SceneObject(
             it.maxY <= v.depth - margin + EPS && it.maxZ <= v.height + EPS
     }
 
-    fun toPlaced() = PlacedObject(mesh.stl, transform, x, y)
+    /**
+     * As the engine gets it. A mesh with holes left gets the engine's extensive
+     * stitching, which joins the open ends of each layer's outlines so walls
+     * with gaps still print.
+     */
+    fun toPlaced() = PlacedObject(
+        mesh.stl, transform, x, y,
+        if (mesh.health.checked && !mesh.health.closed) mapOf("meshfix_extensive_stitching" to "True") else emptyMap(),
+    )
 
     companion object { private const val EPS = 1e-3f }
 }

@@ -18,7 +18,14 @@ import kotlin.math.PI
  * where the centre of its footprint sits, in bed coordinates (mm). The engine
  * drops it onto the bed itself.
  */
-data class PlacedObject(val mesh: File, val transform: Transform, val centerX: Float, val centerY: Float)
+data class PlacedObject(
+    val mesh: File,
+    val transform: Transform,
+    val centerX: Float,
+    val centerY: Float,
+    /** Engine settings for this object only, such as mesh fixes. */
+    val settings: Map<String, String> = emptyMap(),
+)
 
 data class SliceResult(
     val gcode: File,
@@ -106,6 +113,14 @@ class EngineRunner(private val context: Context) {
         val layers = output.bufferedReader().useLines { lines ->
             lines.take(50).firstOrNull { it.startsWith(";LAYER_COUNT:") }?.substringAfter(':')?.trim()?.toIntOrNull()
         }
+        if (layers == 0) {
+            // The engine ran, but no layer had a closed outline to print.
+            throw EngineException(
+                "Nothing to print: the slicer found no closed outlines in any layer. This usually means the " +
+                    "model's walls have gaps. Use Fill holes on it (see Mesh check), then slice again.",
+                tail(log),
+            )
+        }
         val diameter = profile.float("material_diameter") ?: 1.75f
         val meters = filament?.let { it / (PI * (diameter / 2.0) * (diameter / 2.0)) / 1000.0 }
         // Anything more than 30 degrees below the print temperature mid-print is a mistake.
@@ -166,6 +181,7 @@ class EngineRunner(private val context: Context) {
                     add("-s"); add("mesh_position_x=${o.centerX - bedCenterX}")
                     add("-s"); add("mesh_position_y=${o.centerY - bedCenterY}")
                     add("-s"); add("mesh_position_z=0")
+                    for ((k, v) in o.settings) { add("-s"); add("$k=$v") }
                 }
                 add("-o"); add(output.path)
             }

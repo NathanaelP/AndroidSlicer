@@ -35,6 +35,32 @@ Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, wit
   - Each new object keeps the scale and rotation and stays where it was over the bed, then rests on the bed like any object. A floating piece drops down. If pieces end up overlapping, the app says so and **Arrange** spaces them out.
   - Splitting is one undo step. When every part touches another, the app says the object stays as it is.
 
+## Mesh health (M5): holes and broken edges
+
+- **Edge check on import:** while finding parts, the importer has every triangle's welded corner ids. It sorts the triangles' edges (24 bytes per triangle, freed afterwards) and counts how each edge is used. A clean, closed part has every edge shared by exactly two triangles running it opposite ways. Per part, the check counts:
+  - **open edges** (one triangle), traced into **hole** outlines where they close into rims;
+  - **non-manifold edges** (three or more triangles: doubled or overlapping faces);
+  - **flipped edges** (two triangles running the same way: a face inside out);
+  - **flat triangles** (two corners in one place).
+  - It's skipped above 8 million triangles. Rims aren't traced beyond 200,000 open edges, or for parts of fewer than 4 triangles. A mesh averaging under 4 triangles per part is treated as a triangle soup: one part, not separate objects.
+  - Importing 2 million triangles still takes about 1–1.4 s on a desktop with the check included.
+- **Shown:** hole rims are drawn as green lines over everything, so holes on the far side show too. The selected object's card has a **Mesh check** section and the objects list a short note. A clean mesh says "closed, no problems found".
+- **Fill holes** (`MeshRepair.fillHoles`) closes every traced hole with a fan of triangles from the middle of its rim, running the opposite way to the triangles beside it so it faces outwards. It then checks the mesh again, and is one undo step. It suits the flat, roughly round openings exporters leave; an odd-shaped hole is closed, though not neatly.
+- **Leftover open edges:** an object with open edges gets CuraEngine's `meshfix_extensive_stitching` for that object only. Non-manifold and flipped edges are reported but left to the engine, which slices them fine (see below).
+- **Nothing to print:** when the engine finds no closed outline in any layer, the app says so and points to Fill holes, instead of offering empty G-code.
+
+### Exit test, broken half (desktop)
+
+`tools/broken_meshes.py` writes seven broken meshes plus a clean control: two holes cut in a sphere, a box with a missing wall, 10% of faces flipped, every face doubled plus two cubes touching along an edge, flat and non-finite triangles, a triangle soup with no shared corners, and all of these at once. `BrokenMeshesTest` imports them as the app does and fills their holes. `tools/slice_broken.sh` slices every result with the desktop engine and the Normal profile.
+
+```
+python3 tools/broken_meshes.py engine/build/broken
+./gradlew :engine:testDebugUnitTest --tests '*BrokenMeshesTest*'
+tools/slice_broken.sh
+```
+
+All of them slice without crashing. The only empty result is the box with a missing wall: no layer has a closed outline, even with stitching. After Fill holes it slices to 100 layers. In the app, that case now gives the message above. Filling the cut sphere's holes gives it a closed top and side again (81,698 extrusion moves, against 69,386 open).
+
 ## Several objects (M4)
 
 - **Objects:**

@@ -21,9 +21,10 @@ class ViewportScenesTest {
     private fun arr(m: FloatArray) = m.joinToString(",", "[", "]")
 
     /** OBJ text for a box as 6 quads, vertex numbers starting after [base]. */
-    private fun box(base: Int, x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float): String {
+    private fun box(base: Int, x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, skipFaces: Int = 0): String {
         val v = buildString { for (x in listOf(x0, x1)) for (y in listOf(y0, y1)) for (z in listOf(z0, z1)) append("v $x $y $z\n") }
         val q = listOf(intArrayOf(1, 2, 4, 3), intArrayOf(5, 7, 8, 6), intArrayOf(1, 5, 6, 2), intArrayOf(3, 4, 8, 7), intArrayOf(1, 3, 7, 5), intArrayOf(2, 6, 8, 4))
+            .drop(skipFaces)
         return v + q.joinToString("") { s -> "f " + s.joinToString(" ") { (it + base).toString() } + "\n" }
     }
 
@@ -40,6 +41,8 @@ class ViewportScenesTest {
         val cube = MeshImporter.import(File("../../engine/test/cube20.stl").inputStream(), "cube.stl", File(dir, "cube.stl"))
         val ybox = import("ybox", box(0, -5f, 10f, -2f, 5f, 50f, 8f))
         val loose = import("loose", box(0, -10f, -10f, 0f, 10f, 10f, 20f) + box(8, 4f, 4f, 60f, 10f, 10f, 66f))
+        // A box with its left side (x = -15) left open: one hole, drawn as a green outline.
+        val open = import("open", box(0, -15f, -10f, 0f, 15f, 10f, 20f, skipFaces = 1))
         fun obj(id: Long, m: MeshInfo, t: Transform = Transform(), x: Float = 117.5f, y: Float = 115f) = SceneObject(id, m.stl.name, m, t, x, y)
 
         val overview = OrbitCamera.overview(v.width, v.depth, v.height)
@@ -71,6 +74,8 @@ class ViewportScenesTest {
             // A loose part floating above the model: drawn in purple.
             Scene("floating-part", OrbitCamera.framing(obj(1, loose).bounds, yaw = -1.1f, pitch = 0.35f), listOf(Item(obj(1, loose), "amber"))),
             Scene("floating-part-selected", OrbitCamera.framing(obj(1, loose).bounds, yaw = -1.1f, pitch = 0.35f), listOf(Item(obj(1, loose), "selected"))),
+            Scene("hole-outline", OrbitCamera.framing(obj(1, open).bounds, yaw = -2.3f, pitch = 0.45f), listOf(Item(obj(1, open), "amber"))),
+            Scene("hole-outline-behind", OrbitCamera.framing(obj(1, open).bounds, yaw = 0.8f, pitch = 0.45f), listOf(Item(obj(1, open), "selected"))),
             Scene("cube-lowest-view", OrbitCamera.framing(obj(1, cube).bounds, yaw = -1.1f, pitch = 0.45f).orbit(0f, -100000f, 800f),
                 listOf(Item(obj(1, cube), "amber"))),
         )
@@ -83,7 +88,7 @@ class ViewportScenesTest {
                     val c = if (i in floating) (if (color == "selected") "floating_selected" else "floating") else color
                     """[${p.firstTriangle},${p.triangles},"$c"]"""
                 }.joinToString(",", "[", "]")
-                """{"mesh":"${o.mesh.stl.absolutePath}","model":${arr(o.modelMatrix())},"segments":$segs}"""
+                """{"mesh":"${o.mesh.stl.absolutePath}","model":${arr(o.modelMatrix())},"segments":$segs,"lines":${arr(holeOutlines(o.mesh))}}"""
             }
             """  {"name":"${s.name}","bed":[${v.width},${v.depth},${v.height}],"viewProj":${arr(viewProj)},"view":${arr(s.camera.view())},"items":$items}"""
         }

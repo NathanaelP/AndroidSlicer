@@ -95,7 +95,7 @@ fun Viewport(
     // Keep the GPU's meshes in step with the scene, and frame the scene when objects are added or removed.
     val meshKeys = objects.map { it.mesh.stl.path }.distinct()
     LaunchedEffect(meshKeys) {
-        renderer.setMeshes(objects.distinctBy { it.mesh.stl.path }.map { MeshRef(it.mesh.stl.path, it.mesh.stl, it.mesh.triangles) })
+        renderer.setMeshes(objects.distinctBy { it.mesh.stl.path }.map { MeshRef(it.mesh.stl.path, it.mesh.stl, it.mesh.triangles, holeOutlines(it.mesh)) })
     }
     LaunchedEffect(objects.map { it.id }) { camera = frameAll() }
 
@@ -145,7 +145,7 @@ fun Viewport(
                         else o.mesh.parts.mapIndexed { i, part ->
                             Segment(part.firstTriangle, part.triangles, if (i in floating) (if (selected) FLOATING_SELECTED else FLOATING) else base)
                         }
-                        DrawItem(o.mesh.stl.path, o.modelMatrix(), segments)
+                        DrawItem(o.mesh.stl.path, o.modelMatrix(), segments, if (o.mesh.health.holes.isNotEmpty()) HOLE else null)
                     },
                     background = BACKGROUND,
                 )
@@ -269,6 +269,24 @@ private val RED = floatArrayOf(0.90f, 0.36f, 0.30f)
 private val RED_SELECTED = floatArrayOf(1.0f, 0.55f, 0.50f)
 private val FLOATING = floatArrayOf(0.74f, 0.42f, 0.95f)
 private val FLOATING_SELECTED = floatArrayOf(0.86f, 0.62f, 1.0f)
+/** Hole rims: bright green, unlike any object colour. */
+private val HOLE = floatArrayOf(0.30f, 1.0f, 0.45f)
+
+/** Hole rims of [mesh] as line segments (x, y, z pairs), for the renderer. */
+fun holeOutlines(mesh: org.mobileslicer.engine.MeshInfo): FloatArray {
+    val holes = mesh.health.holes
+    val out = FloatArray(holes.sumOf { 2 * it.size })
+    var o = 0
+    for (h in holes) {
+        val n = h.size / 3
+        for (i in 0 until n) {
+            val a = 3 * i; val b = 3 * ((i + 1) % n)
+            for (k in 0 until 3) out[o++] = h[a + k]
+            for (k in 0 until 3) out[o++] = h[b + k]
+        }
+    }
+    return out
+}
 private val BACKGROUND = floatArrayOf(0.11f, 0.11f, 0.13f, 1f)
 
 /** Asks for an OpenGL ES 3 config with 4x multisampling, falling back to none. */

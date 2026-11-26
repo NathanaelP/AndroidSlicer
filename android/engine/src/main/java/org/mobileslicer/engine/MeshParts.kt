@@ -24,6 +24,8 @@ data class MeshPart(
     /** This part's sample points: points [sampleStart] until [sampleStart] + [sampleCount] of MeshInfo.samples. */
     val sampleStart: Int,
     val sampleCount: Int,
+    /** What the edge check found in this part. */
+    val health: PartHealth = PartHealth(),
 )
 
 /** Result of [MeshParts.group]. */
@@ -44,7 +46,10 @@ object MeshParts {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 
-    /** Beyond this many parts the mesh is treated as one: it's a triangle soup, not separate objects. */
+    /**
+     * Beyond this many parts, or with fewer than 4 triangles per part on average,
+     * the mesh is treated as one part: it's a triangle soup, not separate objects.
+     */
     const val MAX_PARTS = 10_000
 
     /**
@@ -53,11 +58,10 @@ object MeshParts {
      * sample points (see MeshInfo.samples).
      */
     fun group(src: File, dst: File, triangles: Int, b: Bounds): PartsResult {
-        // Pass 1: weld corners and join each triangle's corners.
-        val firstCorner = IntArray(triangles)
+        // Pass 1: weld corners (one id per position) and join each triangle's corners.
+        val corners = IntArray(3 * triangles)
         var parent = IntArray(maxOf(1024, triangles / 2))
         var vertices = 0
-        val ids = PositionMap(triangles)
         fun find(v: Int): Int {
             var r = v
             while (parent[r] != r) r = parent[r]
@@ -69,41 +73,53 @@ object MeshParts {
             val ra = find(a); val rc = find(c)
             if (ra != rc) parent[maxOf(ra, rc)] = minOf(ra, rc)
         }
-        forEachTriangle(src, triangles) { t, buf, o ->
-            var first = -1
-            for (k in 0 until 3) {
-                val p = o + 12 + 12 * k
-                val id = ids.findOrInsert(buf.getInt(p), buf.getInt(p + 4), buf.getInt(p + 8), vertices)
-                if (id == vertices) {  // a new corner
-                    if (vertices == parent.size) parent = parent.copyOf(parent.size * 2)
-                    parent[vertices] = vertices
-                    vertices++
+        run {
+            // Scoped so the position map can be freed before the edge check.
+            val ids = PositionMap(triangles)
+            forEachTriangle(src, triangles) { t, buf, o ->
+                for (k in 0 until 3) {
+                    val p = o + 12 + 12 * k
+                    val id = ids.findOrInsert(buf.getInt(p), buf.getInt(p + 4), buf.getInt(p + 8), vertices)
+                    if (id == vertices) {  // a new corner
+                        if (vertices == parent.size) parent = parent.copyOf(parent.size * 2)
+                        parent[vertices] = vertices
+                        vertices++
+                    }
+                    corners[3 * t + k] = id
+                    if (k > 0) union(corners[3 * t], id)
                 }
-                if (first < 0) first = id else union(first, id)
             }
-            firstCorner[t] = first
         }
 
         // Label parts and count their triangles.
         val partOfRoot = IntArray(vertices) { -1 }
         var partCount = 0
-        val partOfTriangle = firstCorner  // reused in place
+        val partOfTriangle = IntArray(triangles)
         for (t in 0 until triangles) {
-            val r = find(firstCorner[t])
+            val r = find(corners[3 * t])
             if (partOfRoot[r] < 0) partOfRoot[r] = partCount++
             partOfTriangle[t] = partOfRoot[r]
         }
-        if (partCount > MAX_PARTS) {
-            // A triangle soup: keep the order and treat it as one part.
+        @Suppress("UNUSED_VALUE") parent = IntArray(0)
+
+        // The edge check, per part (labels as above).
+        val health: Array<PartHealth> =
+            if (triangles > EdgeCheck.MAX_TRIANGLES) Array(partCount) { PartHealth.UNCHECKED }
+            else EdgeCheck.check(src, triangles, corners, partOfTriangle, partCount)
+
+        if (partCount > MAX_PARTS || (partCount > 100 && triangles < 4L * partCount)) {
+            // A triangle soup: keep the order and treat it as one part. Its "holes"
+            // are just its loose triangles, so they aren't offered for filling.
             src.copyTo(dst, overwrite = true)
             val samples = mapped(dst, triangles) { sample(it, b, 0, triangles, 0, LongSet()) }
-            return PartsResult(listOf(MeshPart(0, triangles, b, 0, samples.size / 3)), samples)
+            val total = health.fold(PartHealth()) { a, h -> a + h.copy(holes = emptyList(), untracedOpenEdges = h.openEdges) }
+            return PartsResult(listOf(MeshPart(0, triangles, b, 0, samples.size / 3, total)), samples)
         }
         if (partCount == 1) {
             // The usual case: one connected mesh. Nothing to reorder.
             if (!src.renameTo(dst)) src.copyTo(dst, overwrite = true)
             val samples = mapped(dst, triangles) { sample(it, b, 0, triangles, 0, LongSet()) }
-            return PartsResult(listOf(MeshPart(0, triangles, b, 0, samples.size / 3)), samples)
+            return PartsResult(listOf(MeshPart(0, triangles, b, 0, samples.size / 3, health[0])), samples)
         }
         val counts = IntArray(partCount)
         for (t in 0 until triangles) counts[partOfTriangle[t]]++
@@ -148,7 +164,7 @@ object MeshParts {
             for ((i, p) in order.withIndex()) {
                 val s = sample(map, b, start[p], counts[p], i.toLong(), seen)
                 chunks += s
-                parts += MeshPart(start[p], counts[p], Bounds(lo[p][0], lo[p][1], lo[p][2], hi[p][0], hi[p][1], hi[p][2]), points, s.size / 3)
+                parts += MeshPart(start[p], counts[p], Bounds(lo[p][0], lo[p][1], lo[p][2], hi[p][0], hi[p][1], hi[p][2]), points, s.size / 3, health[p])
                 points += s.size / 3
             }
         }

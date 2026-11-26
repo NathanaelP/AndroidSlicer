@@ -179,6 +179,9 @@ private fun ObjectsCard(state: UiState, vm: SliceViewModel, onOpen: () -> Unit) 
                 if (o.floating.isNotEmpty()) {
                     Text(floatingSummary(o.floating), style = MaterialTheme.typography.bodySmall, color = FLOATING_TEXT)
                 }
+                meshShortSummary(o.mesh.health)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                }
             }
         }
     }
@@ -243,6 +246,8 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
             color = FLOATING_TEXT,
         )
     }
+
+    MeshCheck(o, state, vm)
 
     Text("Rotate", style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -403,6 +408,58 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
         }
         SliceState.Idle -> Button(onClick = vm::slice, enabled = ready) { Text("Slice") }
     }
+}
+
+/** What the edge check found, with Fill holes when there are holes to fill. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MeshCheck(o: org.mobileslicer.app.scene.SceneObject, state: UiState, vm: SliceViewModel) {
+    val h = o.mesh.health
+    val small = MaterialTheme.typography.bodySmall
+    when {
+        !h.checked -> Text("Mesh check skipped: too many triangles to check.", style = small)
+        h.clean -> Text(
+            "Mesh check: closed, no problems found." +
+                if (h.degenerateTriangles > 0) " ${count(h.degenerateTriangles, "flat triangle")} with no area will be ignored." else "",
+            style = small,
+        )
+        else -> {
+            val lines = buildList {
+                if (h.holes.isNotEmpty()) add(
+                    "${count(h.holes.size, "hole")} (green outlines). The slicer will try to join the gaps layer by layer; " +
+                        "Fill holes closes them properly."
+                )
+                if (h.untracedOpenEdges > 0) add(
+                    "${count(h.untracedOpenEdges, "open edge")} that don't form a closed rim. The slicer will try to join them, " +
+                        "but walls may have gaps there."
+                )
+                if (h.nonManifoldEdges > 0) add(
+                    "${count(h.nonManifoldEdges, "edge")} shared by more than two faces (doubled or overlapping faces). " +
+                        "This usually slices fine."
+                )
+                if (h.flippedEdges > 0) add(
+                    "${count(h.flippedEdges, "edge")} between faces pointing opposite ways (some faces are inside out). " +
+                        "This usually slices fine."
+                )
+                if (h.degenerateTriangles > 0) add("${count(h.degenerateTriangles, "flat triangle")} with no area will be ignored.")
+            }
+            Text("Mesh check", style = MaterialTheme.typography.labelLarge)
+            lines.forEach { Text(it, color = MaterialTheme.colorScheme.tertiary) }
+            if (h.holes.isNotEmpty()) {
+                OutlinedButton(onClick = vm::fillHolesSelected, enabled = state.busy == null) { Text("Fill holes") }
+            }
+        }
+    }
+}
+
+private fun count(n: Int, noun: String) = "%,d %s".format(n, if (n == 1) noun else noun + "s")
+
+/** One line for the objects list, or null when the mesh is fine. */
+private fun meshShortSummary(h: org.mobileslicer.engine.PartHealth): String? = when {
+    !h.checked || h.clean -> null
+    h.holes.isNotEmpty() -> count(h.holes.size, "hole")
+    h.openEdges > 0 -> count(h.openEdges, "open edge")
+    else -> "Mesh has doubled or inside-out faces"
 }
 
 /** Purple, matching floating parts in the viewport; readable on light and dark cards. */

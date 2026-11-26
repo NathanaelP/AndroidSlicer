@@ -14,8 +14,12 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-/** A mesh file the renderer may draw; [key] identifies it (duplicated objects share one). */
-data class MeshRef(val key: String, val file: File, val triangles: Long)
+/**
+ * A mesh file the renderer may draw; [key] identifies it (duplicated objects share
+ * one). [outlines] are line segments (x, y, z pairs, mesh coordinates) drawn over
+ * it, such as hole rims.
+ */
+class MeshRef(val key: String, val file: File, val triangles: Long, val outlines: FloatArray = FloatArray(0))
 
 /** A run of triangles in one colour: triangles [first] until [first] + [count]. */
 data class Segment(val first: Int, val count: Int, val color: FloatArray)
@@ -25,7 +29,13 @@ data class Segment(val first: Int, val count: Int, val color: FloatArray)
  * colours as runs of triangles. Parts are contiguous in the mesh, so a part can
  * have its own colour.
  */
-data class DrawItem(val meshKey: String, val matrix: FloatArray, val segments: List<Segment>)
+data class DrawItem(
+    val meshKey: String,
+    val matrix: FloatArray,
+    val segments: List<Segment>,
+    /** Colour for the mesh's outlines, drawn on top of everything; null to leave them out. */
+    val outlineColor: FloatArray? = null,
+)
 
 /** Everything the renderer draws. Replaced as a whole from the UI thread. */
 data class SceneState(
@@ -55,7 +65,7 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
 
     // Meshes to keep on the GPU; read on the GL thread.
     @Volatile private var meshes: List<MeshRef> = emptyList()
-    private class Gpu(val vbo: Int, val triangles: Long)
+    private class Gpu(val vbo: Int, val triangles: Long, val lineVbo: Int = 0, val lineVertices: Int = 0)
     private val uploaded = HashMap<String, Gpu>()
 
     private var width = 1
@@ -144,6 +154,22 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
                 }
             }
         }
+        // Outlines (hole rims) over everything, so holes on the far side show too.
+        if (s.items.any { it.outlineColor != null }) {
+            glUseProgram(flatProgram)
+            glDisable(GL_DEPTH_TEST)
+            glLineWidth(3f)
+            for (item in s.items) {
+                val c = item.outlineColor ?: continue
+                val gpu = uploaded[item.meshKey] ?: continue
+                if (gpu.lineVbo == 0) continue
+                glUniformMatrix4fv(uMvp, 1, false, Mat4.mul(viewProj, item.matrix), 0)
+                glUniform4f(uColor, c[0], c[1], c[2], 1f)
+                drawArrays(gpu.lineVbo, GL_LINES, 0, gpu.lineVertices)
+            }
+            glLineWidth(1f)
+            glEnable(GL_DEPTH_TEST)
+        }
         reportFrame()
     }
 
@@ -162,7 +188,10 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         val wanted = meshes
         val keys = wanted.map { it.key }.toSet()
         for (key in uploaded.keys - keys) {
-            uploaded.remove(key)?.let { if (it.vbo != 0) glDeleteBuffers(1, intArrayOf(it.vbo), 0) }
+            uploaded.remove(key)?.let { g ->
+                if (g.vbo != 0) glDeleteBuffers(1, intArrayOf(g.vbo), 0)
+                if (g.lineVbo != 0) glDeleteBuffers(1, intArrayOf(g.lineVbo), 0)
+            }
             publish()
         }
         for (ref in wanted) {
@@ -170,7 +199,8 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
             val start = SystemClock.elapsedRealtime()
             try {
                 val (vbo, tris) = uploadStl(ref.file, ref.triangles)
-                uploaded[ref.key] = Gpu(vbo, tris)
+                val lines = if (ref.outlines.isNotEmpty()) buffer(ref.outlines) else 0
+                uploaded[ref.key] = Gpu(vbo, tris, lines, ref.outlines.size / 3)
                 lastUploadMillis = SystemClock.elapsedRealtime() - start
                 lastError = null
             } catch (e: Exception) {

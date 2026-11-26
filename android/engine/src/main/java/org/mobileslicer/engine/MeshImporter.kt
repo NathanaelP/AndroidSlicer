@@ -38,7 +38,10 @@ data class MeshInfo(
     val samples: FloatArray = FloatArray(0),
     /** The mesh's connected parts, largest first; their triangles sit together in [stl]. */
     val parts: List<MeshPart> = listOf(MeshPart(0, triangles.toInt(), bounds, 0, samples.size / 3)),
-)
+) {
+    /** The edge check over all parts. */
+    val health: PartHealth by lazy { parts.fold(PartHealth()) { a, p -> a + p.health } }
+}
 
 class MeshImportException(message: String) : IOException(message)
 

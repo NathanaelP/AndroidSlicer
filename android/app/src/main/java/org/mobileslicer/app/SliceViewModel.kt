@@ -25,6 +25,7 @@ import org.mobileslicer.app.scene.placeNew
 import org.mobileslicer.app.scene.splitGroups
 import org.mobileslicer.app.scene.splitInto
 import org.mobileslicer.engine.MeshParts
+import org.mobileslicer.engine.MeshRepair
 import org.mobileslicer.engine.EngineException
 import org.mobileslicer.engine.EngineRunner
 import org.mobileslicer.engine.MeshImporter
@@ -265,6 +266,38 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
             val overlap = _state.value.scene.overlapping().any { (a, b) -> a in pieces || b in pieces }
             _state.update {
                 it.copy(message = "Split into ${pieces.size} objects." + if (overlap) " Some overlap: tap Arrange to space them out." else "")
+            }
+        }
+    }
+
+    /**
+     * Closes the selected object's holes (see MeshRepair.fillHoles) and checks
+     * the mesh again. One undoable step; the object keeps its place.
+     */
+    fun fillHolesSelected() {
+        val o = _state.value.scene.selected ?: return
+        if (_state.value.busy != null || o.mesh.health.holes.isEmpty()) return
+        _state.update { it.copy(busy = "Filling holes…", layFlatMode = false) }
+        val file = File(workDir, "mesh-${o.id}-filled-${nextId++}.stl")
+        viewModelScope.launch {
+            val fixed = try {
+                withContext(Dispatchers.IO) { MeshRepair.fillHoles(o.mesh, file) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(busy = null, message = "Couldn't fill the holes: ${e.message}") }
+                return@launch
+            }
+            val before = o.mesh.health.holes.size
+            history.breakMerge()
+            edit { s -> s.update(o.id) { x -> x.copy(mesh = fixed) } }
+            val left = fixed.health
+            _state.update {
+                it.copy(
+                    busy = null,
+                    message = "Filled ${if (before == 1) "1 hole" else "$before holes"} with ${"%,d".format(fixed.triangles - o.mesh.triangles)} triangles." +
+                        if (left.closed) " The mesh is now closed." else " Some open edges are left.",
+                )
             }
         }
     }
