@@ -32,10 +32,12 @@ data class MeshInfo(
     val skippedTriangles: Long,
     /**
      * A thinned-out set of the mesh's vertices (x, y, z, ...): one per cell of a
-     * grid about 1/400 of the model's size. Used for bounds after arbitrary
-     * rotations without re-reading the whole mesh.
+     * grid about 1/400 of the model's size, per part. Used for bounds after
+     * arbitrary rotations without re-reading the whole mesh.
      */
     val samples: FloatArray = FloatArray(0),
+    /** The mesh's connected parts, largest first; their triangles sit together in [stl]. */
+    val parts: List<MeshPart> = listOf(MeshPart(0, triangles.toInt(), bounds, 0, samples.size / 3)),
 )
 
 class MeshImportException(message: String) : IOException(message)
@@ -55,7 +57,24 @@ object MeshImporter {
     /** Called with the number of input bytes read so far. */
     fun interface Progress { fun onBytes(read: Long) }
 
-    fun import(input: InputStream, fileName: String, out: File, progress: Progress = Progress {}): MeshInfo {
+    fun import(input: InputStream, fileName: String, out: File, progress: Progress = Progress {}, onAnalysing: () -> Unit = {}): MeshInfo {
+        // Convert to a plain binary STL first, then group its triangles by connected part.
+        val raw = File(out.parentFile, out.name + ".raw")
+        try {
+            val info = convert(input, fileName, raw, progress)
+            if (info.triangles > Int.MAX_VALUE / 50) throw MeshImportException("The mesh has too many triangles.")
+            onAnalysing()
+            val grouped = MeshParts.group(raw, out, info.triangles.toInt(), info.bounds)
+            return info.copy(stl = out, samples = grouped.samples, parts = grouped.parts)
+        } catch (e: Exception) {
+            out.delete()  // no half-written output
+            throw e
+        } finally {
+            raw.delete()
+        }
+    }
+
+    private fun convert(input: InputStream, fileName: String, out: File, progress: Progress): MeshInfo {
         val counting = CountingInputStream(BufferedInputStream(input, 1 shl 16), progress)
         val head = ByteArray(84)
         counting.mark(head.size)
@@ -73,72 +92,7 @@ object MeshImporter {
             }
             if (writer.triangles == 0L) throw MeshImportException("The file has no triangles.")
             writer.finish()
-            val bounds = writer.bounds()
-            MeshInfo(out, format, writer.triangles, bounds, writer.skipped, sampleVertices(out, bounds))
-        }
-    }
-
-    /**
-     * Reads the binary STL back and keeps one vertex per grid cell (the grid is
-     * [CELLS_PER_DIAGONAL] cells across the model's diagonal).
-     */
-    fun sampleVertices(stl: File, b: Bounds): FloatArray {
-        val diag = sqrt(b.sizeX * b.sizeX + b.sizeY * b.sizeY + b.sizeZ * b.sizeZ)
-        val cell = maxOf(diag / CELLS_PER_DIAGONAL, 1e-6f)
-        val seen = LongSet()
-        var out = FloatArray(3 * 4096)
-        var n = 0
-        val record = ByteArray(50 * 4096)
-        val buf = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
-        BufferedInputStream(stl.inputStream(), 1 shl 16).use { input ->
-            if (readFully(input, ByteArray(84), 0, 84) < 84) return FloatArray(0)
-            while (true) {
-                val read = readFully(input, record, 0, record.size)
-                val tris = read / 50
-                if (tris == 0) break
-                for (t in 0 until tris) for (v in 0 until 3) {
-                    val o = 50 * t + 12 + 12 * v
-                    val x = buf.getFloat(o); val y = buf.getFloat(o + 4); val z = buf.getFloat(o + 8)
-                    val ix = ((x - b.minX) / cell).toLong(); val iy = ((y - b.minY) / cell).toLong(); val iz = ((z - b.minZ) / cell).toLong()
-                    if (seen.add((ix * 4096L + iy) * 4096L + iz)) {
-                        if (n + 3 > out.size) out = out.copyOf(out.size * 2)
-                        out[n] = x; out[n + 1] = y; out[n + 2] = z; n += 3
-                    }
-                }
-                if (read < record.size) break
-            }
-        }
-        return out.copyOf(n)
-    }
-
-    /** An open-addressing set of longs: no boxing, much faster than HashSet<Long> for millions of keys. */
-    private class LongSet {
-        private var keys = LongArray(1 shl 16)
-        private var used = BooleanArray(1 shl 16)
-        private var size = 0
-
-        /** Adds [k]; returns true if it wasn't there yet. */
-        fun add(k: Long): Boolean {
-            if (size * 2 >= keys.size) grow()
-            var i = slot(k, keys.size)
-            while (used[i]) {
-                if (keys[i] == k) return false
-                i = (i + 1) and (keys.size - 1)
-            }
-            used[i] = true; keys[i] = k; size++
-            return true
-        }
-
-        private fun slot(k: Long, n: Int): Int {
-            var h = k * -0x61c8864680b583ebL  // Fibonacci hashing
-            h = h xor (h ushr 29)
-            return (h and (n - 1).toLong()).toInt()
-        }
-
-        private fun grow() {
-            val oldK = keys; val oldU = used
-            keys = LongArray(oldK.size * 2); used = BooleanArray(oldK.size * 2); size = 0
-            for (i in oldK.indices) if (oldU[i]) add(oldK[i])
+            MeshInfo(out, format, writer.triangles, writer.bounds(), writer.skipped)
         }
     }
 

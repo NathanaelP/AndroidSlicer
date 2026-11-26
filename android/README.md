@@ -22,6 +22,19 @@ After slicing, `GcodePostProcessor` writes the real print time, filament length 
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
 
+## Mesh health (M5): floating parts and splitting
+
+- **Parts on import:** `MeshParts` finds a mesh's connected parts, meaning triangles joined through shared corners (corners are matched by exact coordinates, which is how exporters write shared vertices). It then rewrites the mesh with each part's triangles together, largest part first, recording each part's exact bounds and its own sample points.
+  - A single-part mesh, the usual case, is just renamed with no rewrite.
+  - A "triangle soup" with more than 10,000 parts is treated as one part.
+  - On a desktop, importing 2 million triangles takes about 2–3 s in all.
+  - Sample points now also cover the surface of large triangles, spaced 1/100 of the model's size, so flat faces of simple models count too.
+- **Floating parts:** a part floats when, after the object's rotation and scale, its lowest point is more than 0.3 mm above the bed, and no part that reaches lower has surface inside its box. So an eye pushed into a head, a hat sitting on one, or an arm sticking out of a body counts as attached, while a loose piece above the model doesn't. This works from sample points, so it's an estimate.
+- **Shown:** floating parts are drawn in purple. The objects list, the selected object's card and the slice card all say how high they start. Slicing is still allowed, since supports (M8/M10) are what make such parts printable.
+- **Split into parts:** the selected object's card has a **Split into parts** button when its mesh has more than one part. Parts whose surfaces come within 0.3 mm of each other (at the object's scale) stay together, so an articulated figure stays one object while a loose figure becomes its own. `MeshParts.touchingGroups` buckets the sample points on a grid and joins parts with points that close, so the real reach is 0.3 mm plus about 1% of the model's size. `MeshParts.extract` copies each group's triangle ranges and sample points into a mesh file of its own.
+  - Each new object keeps the scale and rotation and stays where it was over the bed, then rests on the bed like any object. A floating piece drops down. If pieces end up overlapping, the app says so and **Arrange** spaces them out.
+  - Splitting is one undo step. When every part touches another, the app says the object stays as it is.
+
 ## Several objects (M4)
 
 - **Objects:**
@@ -106,3 +119,4 @@ The first Nomad export (about 3 mm tall, since Nomad doesn't export in millimetr
 | 2026-11-25 | Samsung Galaxy S25 Ultra, Android 17 | Nomad Sculpt teddy bear, 4,498,610 triangles, scaled to 64.6 mm | **M3 exit test passed.** Loaded in 0.4 s and stayed at 98–114 fps while orbiting, panning and zooming. Two fixes came out of the test: the model's base showed through the bed when seen from below, and **Fit to bed** was squeezed on a phone. |
 | 2026-11-25 | Samsung Galaxy Tab S8+, landscape | Same 4.5-million-triangle teddy bear, version 0.3.1 | Sits flat on the bed with the fixes in place. About 55 fps while moving, and still smooth to use. First run of the tablet layout, with the viewport beside the settings panel. |
 | 2026-11-25 | Samsung Galaxy Tab S8+, landscape | Three Nomad Sculpt exports (2,057,182 triangles in total): one laid flat, one rotated, arranged | **M4 exit test passed.** Three objects sliced together on the tablet in 7.7 s: 532 layers, 3 h 21 min, 30.35 m of PLA. The viewport stayed at 121 fps. The G-code passes all 21 checks against the Normal profile. **Found:** one export held a second, tiny figure far from the main one, a leftover object in the Nomad scene. It would print in mid-air, starting 74 mm above the bed. Detecting floating parts is planned for M5 (mesh health). |
+| 2026-11-25 | Samsung Galaxy Tab S8+, landscape | Version 0.5.0: "Jesus and Us" (two figures made of many parts, one figure loose) plus a carabiner and a jug, 7,454,422 triangles in all | **Floating parts passed.** Lying down, the loose figure and parts of the large figure that lift off the bed (such as the torso, 0.32 mm up) showed in purple: "8 separate parts start 0.32–113.2 mm above the bed". Stood up with X 90°, the loose figure reached the bed and only 2 parts were left, starting 51.5 mm up. About 36 fps with 7.4 million triangles. The G-code (861 layers, 1 h 56 min, 8.96 m) passes all 21 checks against the Normal profile. |

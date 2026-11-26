@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- largeHeap: finding the parts of a multi-million-triangle sculpt briefly
+         needs around 150 MB, near the default per-app limit on some devices. -->
     <application
+        android:largeHeap="true"
         android:label="MobileSlicer"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity

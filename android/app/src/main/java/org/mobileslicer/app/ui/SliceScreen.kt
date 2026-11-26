@@ -176,6 +176,9 @@ private fun ObjectsCard(state: UiState, vm: SliceViewModel, onOpen: () -> Unit) 
                     style = MaterialTheme.typography.bodySmall,
                     color = if (o.id in outOfBounds) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (o.floating.isNotEmpty()) {
+                    Text(floatingSummary(o.floating), style = MaterialTheme.typography.bodySmall, color = FLOATING_TEXT)
+                }
             }
         }
     }
@@ -232,6 +235,15 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
         )
     }
 
+    if (o.floating.isNotEmpty()) {
+        Text(
+            floatingSummary(o.floating) + " (shown in purple), with nothing under " +
+                (if (o.floating.size == 1) "it" else "them") + ". It will print in mid-air unless supports are added. " +
+                "Supports come in a later version. Turning the model may also bring it down to the bed.",
+            color = FLOATING_TEXT,
+        )
+    }
+
     Text("Rotate", style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FilledTonalButton(onClick = { vm.rotate("X", 90f) }) { Text("X 90°") }
@@ -257,6 +269,15 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = vm::duplicateSelected) { Text("Duplicate") }
         OutlinedButton(onClick = vm::deleteSelected) { Text("Delete") }
+        if (o.mesh.parts.size > 1) {
+            OutlinedButton(onClick = vm::splitSelected, enabled = state.busy == null) { Text("Split into parts") }
+        }
+    }
+    if (o.mesh.parts.size > 1) {
+        Text(
+            "Split makes each separate piece its own object. Parts that touch stay together.",
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -312,6 +333,14 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
         Text(
             "Can't slice yet: ${outside.joinToString { it.name }} ${if (outside.size == 1) "is" else "are"} outside the build volume.",
             color = MaterialTheme.colorScheme.error,
+        )
+    }
+    val floating = objects.filter { it.floating.isNotEmpty() }
+    if (floating.isNotEmpty()) {
+        Text(
+            "${floating.joinToString { it.name }} ${if (floating.size == 1) "has" else "have"} parts that would print in mid-air " +
+                "(shown in purple). You can still slice, but those parts need supports to print properly.",
+            color = FLOATING_TEXT,
         )
     }
     val overlapping = state.scene.overlapping()
@@ -375,6 +404,13 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
         SliceState.Idle -> Button(onClick = vm::slice, enabled = ready) { Text("Slice") }
     }
 }
+
+/** Purple, matching floating parts in the viewport; readable on light and dark cards. */
+private val FLOATING_TEXT = androidx.compose.ui.graphics.Color(0xFF8E44C9)
+
+private fun floatingSummary(f: List<org.mobileslicer.app.scene.FloatingPart>): String =
+    if (f.size == 1) "1 separate part starts ${mm(f[0].height)} mm above the bed"
+    else "${f.size} separate parts start ${mm(f.minOf { it.height })}–${mm(f.maxOf { it.height })} mm above the bed"
 
 private fun stageLabel(stage: String?) = when (stage) {
     "slice" -> "cutting the models into layers"
