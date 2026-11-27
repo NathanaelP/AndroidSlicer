@@ -102,6 +102,9 @@ fun Viewport(
     val meshKeys = objects.map { it.mesh.stl.path }.distinct()
     LaunchedEffect(meshKeys) {
         renderer.setMeshes(objects.distinctBy { it.mesh.stl.path }.map { MeshRef(it.mesh.stl.path, it.mesh.stl, it.mesh.triangles, holeOutlines(it.mesh)) })
+        // This runs after the frame the scene change asked for, which had no mesh for a new key
+        // (e.g. after Simplify or Fill holes), so draw again now that the renderer knows it.
+        glView?.requestRender()
     }
     LaunchedEffect(objects.map { it.id }) { camera = frameAll() }
 
