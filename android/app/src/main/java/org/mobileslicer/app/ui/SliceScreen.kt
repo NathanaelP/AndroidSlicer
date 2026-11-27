@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.mobileslicer.app.SliceState
 import org.mobileslicer.app.SliceViewModel
+import org.mobileslicer.app.scene.unitGuesses
 import org.mobileslicer.app.UiState
 import org.mobileslicer.app.viewport.Viewport
 import java.util.Locale
@@ -179,6 +180,9 @@ private fun ObjectsCard(state: UiState, vm: SliceViewModel, onOpen: () -> Unit) 
                 if (o.floating.isNotEmpty()) {
                     Text(floatingSummary(o.floating), style = MaterialTheme.typography.bodySmall, color = FLOATING_TEXT)
                 }
+                meshShortSummary(o.mesh.health)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                }
             }
         }
     }
@@ -230,9 +234,18 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
             color = MaterialTheme.colorScheme.error,
         )
         maxOf(b.sizeX, b.sizeY, b.sizeZ) < 5f -> Text(
-            "Very small. Sculpting apps don't export in millimetres: enter the height you want, or use Fit to bed.",
+            "Very small. The file may not be in millimetres: sculpting and CAD apps often export in other units. " +
+                "Pick one below, enter the height you want, or use Fit to bed.",
             color = MaterialTheme.colorScheme.tertiary,
         )
+    }
+    val guesses = o.unitGuesses(v)
+    if (guesses.isNotEmpty()) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            guesses.forEach { g ->
+                FilledTonalButton(onClick = { vm.scaleUnits(g.factor) }) { Text("In ${g.unit} (${mm(g.heightMm)} mm tall)") }
+            }
+        }
     }
 
     if (o.floating.isNotEmpty()) {
@@ -243,6 +256,9 @@ private fun SelectedCard(state: UiState, vm: SliceViewModel) = Section("Selected
             color = FLOATING_TEXT,
         )
     }
+
+    MeshCheck(o, state, vm)
+    SimplifyTools(o, state, vm)
 
     Text("Rotate", style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -403,6 +419,89 @@ private fun SliceCard(state: UiState, vm: SliceViewModel, onSave: () -> Unit) = 
         }
         SliceState.Idle -> Button(onClick = vm::slice, enabled = ready) { Text("Slice") }
     }
+}
+
+/** What the edge check found, with Fill holes when there are holes to fill. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MeshCheck(o: org.mobileslicer.app.scene.SceneObject, state: UiState, vm: SliceViewModel) {
+    val h = o.mesh.health
+    val small = MaterialTheme.typography.bodySmall
+    when {
+        !h.checked -> Text("Mesh check skipped: too many triangles to check.", style = small)
+        h.clean -> Text(
+            "Mesh check: closed, no problems found." +
+                if (h.degenerateTriangles > 0) " ${count(h.degenerateTriangles, "flat triangle")} with no area will be ignored." else "",
+            style = small,
+        )
+        else -> {
+            val lines = buildList {
+                if (h.holes.isNotEmpty()) add(
+                    "${count(h.holes.size, "hole")} (green outlines). The slicer will try to join the gaps layer by layer; " +
+                        "Fill holes closes them properly."
+                )
+                if (h.untracedOpenEdges > 0) add(
+                    "${count(h.untracedOpenEdges, "open edge")} that don't form a closed rim. The slicer will try to join them, " +
+                        "but walls may have gaps there."
+                )
+                if (h.nonManifoldEdges > 0) add(
+                    "${count(h.nonManifoldEdges, "edge")} shared by more than two faces (doubled or overlapping faces" +
+                        (if (o.mesh.simplifiedFrom > 0) ", or pinched by simplifying" else "") + "). This usually slices fine."
+                )
+                if (h.flippedEdges > 0) add(
+                    "${count(h.flippedEdges, "edge")} between faces pointing opposite ways (some faces are inside out). " +
+                        "This usually slices fine."
+                )
+                if (h.degenerateTriangles > 0) add("${count(h.degenerateTriangles, "flat triangle")} with no area will be ignored.")
+            }
+            Text("Mesh check", style = MaterialTheme.typography.labelLarge)
+            lines.forEach { Text(it, color = MaterialTheme.colorScheme.tertiary) }
+            if (h.holes.isNotEmpty()) {
+                OutlinedButton(onClick = vm::fillHolesSelected, enabled = state.busy == null) { Text("Fill holes") }
+            }
+        }
+    }
+}
+
+/** Simplify, for dense meshes; and how much simplifying has already done. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SimplifyTools(o: org.mobileslicer.app.scene.SceneObject, state: UiState, vm: SliceViewModel) {
+    val m = o.mesh
+    if (m.simplifiedFrom > 0) {
+        Text(
+            "Simplified from %,d triangles; the surface moved by at most %s mm at this size."
+                .format(m.simplifiedFrom, mm3(m.simplifyError * o.transform.scale)),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (m.triangles < SIMPLIFY_FROM) return
+    Text("Simplify", style = MaterialTheme.typography.labelLarge)
+    Text(
+        "%,d triangles. Fewer make slicing and the view faster. The surface stays within the distance you pick; ".format(m.triangles) +
+            "0.02 mm is far below what the printer can show.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (t in listOf(0.01f, 0.02f, 0.05f)) {
+            OutlinedButton(onClick = { vm.simplifySelected(t) }, enabled = state.busy == null) { Text("Within ${mm3(t)} mm") }
+        }
+    }
+}
+
+/** Offered from this many triangles. */
+private const val SIMPLIFY_FROM = 200_000L
+
+private fun mm3(v: Float) = String.format(java.util.Locale.ROOT, "%.3f", v).trimEnd('0').trimEnd('.').ifEmpty { "0" }
+
+private fun count(n: Int, noun: String) = "%,d %s".format(n, if (n == 1) noun else noun + "s")
+
+/** One line for the objects list, or null when the mesh is fine. */
+private fun meshShortSummary(h: org.mobileslicer.engine.PartHealth): String? = when {
+    !h.checked || h.clean -> null
+    h.holes.isNotEmpty() -> count(h.holes.size, "hole")
+    h.openEdges > 0 -> count(h.openEdges, "open edge")
+    else -> "Mesh has doubled or inside-out faces"
 }
 
 /** Purple, matching floating parts in the viewport; readable on light and dark cards. */

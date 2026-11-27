@@ -5,7 +5,7 @@
 Passes the engine exactly what the app's EngineRunner passes, so desktop and
 device runs can be compared.
 
-Usage: profiles/slice_desktop.py PROFILE.json MODEL.stl OUT.gcode [--scale 1.0]
+Usage: profiles/slice_desktop.py PROFILE.json MODEL.stl OUT.gcode [--scale 1.0] [--set KEY=VALUE ...]
 """
 import argparse
 import json
@@ -23,6 +23,8 @@ def main() -> int:
     ap.add_argument("model", type=Path)
     ap.add_argument("out", type=Path)
     ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="a setting for this object only, as the app passes after -l (such as mesh fixes)")
     ap.add_argument("--engine", type=Path, default=WORK / "host" / "bin" / "CuraEngine")
     ap.add_argument("--defs", type=Path, default=WORK / "src" / "cura" / "resources" / "definitions")
     args = ap.parse_args()
@@ -33,7 +35,7 @@ def main() -> int:
     cmd = [str(args.engine), "slice", "-d", str(args.defs), "--force-read-parent", "--force-read-nondefault",
            "-j", str(args.defs / "fdmprinter.def.json"), *s_args, "-e0", *s_args,
            "-s", "center_object=True", "-s", f"mesh_rotation_matrix=[[{m},0,0],[0,{m},0],[0,0,{m}]]",
-           "-l", str(args.model), "-o", str(args.out)]
+           "-l", str(args.model), *[a for kv in args.set for a in ("-s", kv)], "-o", str(args.out)]
     log = args.out.with_suffix(".log")
     with log.open("w") as f:
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT).returncode

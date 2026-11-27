@@ -25,6 +25,7 @@ Versions are pinned in [`engine/versions.env`](engine/versions.env). Sources are
 | Wagyu | 0.5.0 | BSL-1.0 (one file BSD-3-Clause, Google) | https://github.com/mapbox/wagyu |
 | mapbox geometry.hpp | 2.0.3 | ISC | https://github.com/mapbox/geometry.hpp |
 | mapbox variant | 1.2.0 | BSD-3-Clause | https://github.com/mapbox/variant |
+| meshoptimizer (`simplifier.cpp`, `allocator.cpp`, in `libmeshsimplify.so`) | 1.2 | MIT | https://github.com/zeux/meshoptimizer |
 | zlib | 1.3.1 | Zlib | https://github.com/madler/zlib |
 | libpng | 1.6.48 | libpng-2.0 | https://github.com/pnggroup/libpng |
 | Jetpack Compose (BOM 2026.09.00), AndroidX Activity and Lifecycle | see `android/app/build.gradle.kts` | Apache-2.0 | https://developer.android.com/jetpack/androidx |

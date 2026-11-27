@@ -112,7 +112,9 @@ try {
     bufs[name] = [buf(new Float32Array(bytes.buffer)), bytes.length / 12];
   }
   gl.useProgram(model);
+  const lineItems = [];
   for (const it of scene.items) {
+    if (it.lines && it.lines.length) lineItems.push(it);
     const m = new Float32Array(it.model);
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uMvp'), false, mul(vp, m));
     gl.uniformMatrix4fv(gl.getUniformLocation(model, 'uModelView'), false, mul(new Float32Array(scene.view), m));
@@ -122,6 +124,14 @@ try {
       draw(b, gl.TRIANGLES, first * 3, count * 3);
     }
   }
+  // Hole outlines over everything, as ViewportRenderer draws them.
+  gl.useProgram(flat); gl.disable(gl.DEPTH_TEST); gl.lineWidth(3);
+  for (const it of lineItems) {
+    gl.uniformMatrix4fv(uMvp, false, mul(vp, new Float32Array(it.model)));
+    gl.uniform4f(uColor, 0.30, 1.0, 0.45, 1);
+    draw(buf(new Float32Array(it.lines)), gl.LINES, 0, it.lines.length / 3);
+  }
+  gl.enable(gl.DEPTH_TEST);
   document.title = 'ok';
 } catch (err) { document.title = 'error: ' + err.message; }
 </script></body></html>"""

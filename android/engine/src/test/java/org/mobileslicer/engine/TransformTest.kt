@@ -77,7 +77,7 @@ class TransformTest {
     @Test fun commandForSeveralObjects() {
         val profile = Profile("p", "P", "Q", "M", "PLA", 1.24, linkedMapOf("machine_width" to "235", "machine_depth" to "230"))
         val a = PlacedObject(File("/m/a.stl"), Transform(), 67.5f, 115f)
-        val b = PlacedObject(File("/m/b.stl"), Transform(scale = 2f), 117.5f, 155f)
+        val b = PlacedObject(File("/m/b.stl"), Transform(scale = 2f), 117.5f, 155f, mapOf("meshfix_extensive_stitching" to "True"))
         val cmd = EngineRunner.buildCommand(File("/e/eng"), File("/d"), profile, listOf(a, b), File("/o/x.gcode"))
         val tail = cmd.subList(cmd.indexOf("-e0") + 5, cmd.size) // after the extruder's profile settings
         assertEquals(
@@ -86,6 +86,7 @@ class TransformTest {
                 "-s", "center_object=True", "-s", "mesh_position_x=-50.0", "-s", "mesh_position_y=0.0", "-s", "mesh_position_z=0",
                 "-e0", "-s", "mesh_rotation_matrix=[[2.0,0,0],[0,2.0,0],[0,0,2.0]]", "-l", "/m/b.stl",
                 "-s", "center_object=True", "-s", "mesh_position_x=0.0", "-s", "mesh_position_y=40.0", "-s", "mesh_position_z=0",
+                "-s", "meshfix_extensive_stitching=True",
                 "-o", "/o/x.gcode",
             ),
             tail,

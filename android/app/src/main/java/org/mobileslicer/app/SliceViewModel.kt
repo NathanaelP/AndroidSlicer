@@ -25,6 +25,8 @@ import org.mobileslicer.app.scene.placeNew
 import org.mobileslicer.app.scene.splitGroups
 import org.mobileslicer.app.scene.splitInto
 import org.mobileslicer.engine.MeshParts
+import org.mobileslicer.engine.MeshRepair
+import org.mobileslicer.engine.MeshSimplifier
 import org.mobileslicer.engine.EngineException
 import org.mobileslicer.engine.EngineRunner
 import org.mobileslicer.engine.MeshImporter
@@ -269,6 +271,80 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Closes the selected object's holes (see MeshRepair.fillHoles) and checks
+     * the mesh again. One undoable step; the object keeps its place.
+     */
+    fun fillHolesSelected() {
+        val o = _state.value.scene.selected ?: return
+        if (_state.value.busy != null || o.mesh.health.holes.isEmpty()) return
+        _state.update { it.copy(busy = "Filling holes…", layFlatMode = false) }
+        val file = File(workDir, "mesh-${o.id}-filled-${nextId++}.stl")
+        viewModelScope.launch {
+            val fixed = try {
+                withContext(Dispatchers.IO) { MeshRepair.fillHoles(o.mesh, file) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(busy = null, message = "Couldn't fill the holes: ${e.message}") }
+                return@launch
+            }
+            val before = o.mesh.health.holes.size
+            history.breakMerge()
+            edit { s -> s.update(o.id) { x -> x.copy(mesh = fixed) } }
+            val left = fixed.health
+            _state.update {
+                it.copy(
+                    busy = null,
+                    message = "Filled ${if (before == 1) "1 hole" else "$before holes"} with ${"%,d".format(fixed.triangles - o.mesh.triangles)} triangles." +
+                        if (left.closed) " The mesh is now closed." else " Some open edges are left.",
+                )
+            }
+        }
+    }
+
+    /**
+     * Simplifies the selected object's mesh so its surface moves by at most about
+     * [toleranceMm] at its current size. One undoable step.
+     */
+    fun simplifySelected(toleranceMm: Float) {
+        val o = _state.value.scene.selected ?: return
+        if (_state.value.busy != null) return
+        _state.update { it.copy(busy = "Simplifying…", layFlatMode = false) }
+        val file = File(workDir, "mesh-${o.id}-simplified-${nextId++}.stl")
+        viewModelScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) { MeshSimplifier.simplify(o.mesh, toleranceMm / o.transform.scale, file) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(busy = null, message = "Couldn't simplify: ${e.message}") }
+                return@launch
+            }
+            if (result.mesh.triangles >= o.mesh.triangles) {
+                file.delete()
+                _state.update { it.copy(busy = null, message = "Already as simple as that tolerance allows.") }
+                return@launch
+            }
+            history.breakMerge()
+            edit { s -> s.update(o.id) { x -> x.copy(mesh = result.mesh) } }
+            _state.update {
+                it.copy(
+                    busy = null,
+                    message = "Simplified from %,d to %,d triangles; the surface moved by at most %s mm."
+                        .format(o.mesh.triangles, result.mesh.triangles, fmt(result.error * o.transform.scale, 3)),
+                )
+            }
+        }
+    }
+
+    /** Scales the selected object by [factor], for a file in other units (cm, inches, m). */
+    fun scaleUnits(factor: Float) {
+        val id = _state.value.scene.selectedId ?: return
+        history.breakMerge()
+        edit { it.update(id) { o -> o.copy(transform = o.transform.copy(scale = factor)) } }
+    }
+
     fun arrangeAll() {
         val s = _state.value
         val placed = arrange(s.scene.objects, volume(s), spacing(s))
@@ -306,10 +382,21 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
                             it, name, File(workDir, "mesh-$id.stl"),
                             progress = { read -> _state.update { s -> s.copy(importing = Triple(name, read, size)) } },
                             onAnalysing = { _state.update { s -> s.copy(busy = "Finding separate parts…") } },
+                            onSimplifying = { n ->
+                                _state.update { s -> s.copy(busy = "Simplifying %,d triangles…".format(n)) }
+                            },
                         )
                     }
                 }
-                _state.update { it.copy(importing = null, busy = null) }
+                _state.update {
+                    it.copy(
+                        importing = null, busy = null,
+                        message = if (info.simplifiedFrom > 0)
+                            "$name had %,d triangles, more than this device handles comfortably, so it was simplified to %,d."
+                                .format(info.simplifiedFrom, info.triangles)
+                        else null,
+                    )
+                }
                 history.breakMerge()
                 val obj = SceneObject(id, name, info, Transform(), 0f, 0f)
                 edit { s -> Scene(placeNew(s.objects, obj, volume(), spacing()), id) }
@@ -317,6 +404,10 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(importing = null, busy = null, message = "Couldn't read $name: ${e.message}") }
+            } catch (e: OutOfMemoryError) {
+                _state.update {
+                    it.copy(importing = null, busy = null, message = "$name is too large to open on this device. Simplify it in your sculpting app and export again.")
+                }
             }
         }
     }
