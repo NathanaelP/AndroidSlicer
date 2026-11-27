@@ -104,6 +104,8 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
                     onMoveEnd = vm::moveEnd,
                     onFaceTap = vm::layFlatAt,
                     modifier = mod,
+                    preview = previewDraw(state),
+                    overlay = { LayerSlider(state, vm) },
                 )
             }
             val panel: @Composable (Modifier) -> Unit = { mod ->
@@ -113,6 +115,7 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
                     if (state.scene.objects.isNotEmpty()) {
                         ProfileCard(state, vm)
                         SliceCard(state, vm, onSave = { saveGcode.launch(vm.suggestedGcodeName()) })
+                        PreviewCard(state, vm)
                     }
                 }
             }
@@ -134,7 +137,7 @@ fun SliceScreen(vm: SliceViewModel = viewModel()) {
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
+internal fun Section(title: String, content: @Composable () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)

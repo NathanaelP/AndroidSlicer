@@ -22,6 +22,20 @@ After slicing, `GcodePostProcessor` writes the real print time, filament length 
 
 Since M2 the profiles come from Cura's own Elegoo Neptune 4 Pro definitions, with Elegoo's start and end G-code. M1 used a placeholder profile.
 
+## G-code preview (M6)
+
+- **Toolpaths from the G-code itself:** after slicing, `GcodePreview` reads the saved file, the same file you print. It's a byte-level parser with no allocation per line. It follows G0/G1 with absolute or relative positioning and extrusion, G92 resets, and Cura's `;LAYER:`, `;TYPE:` and `;TIME_ELAPSED:` comments.
+  - The purge line before the first layer and the end G-code after the last layer's time stamp are left out.
+  - Each extrusion's width comes from its filament: volume ÷ length ÷ layer height, the rectangle Cura plans with.
+  - Filament counts only new extrusion, not the push back after a retraction.
+  - On a desktop, your 11.7 MB, 862-layer job from the M5 test reads in 0.3 s, giving 336,628 beads and 42,447 travel moves. That's 10 MB of draw data, outside the Java heap.
+- **Drawing:** each bead is one instance of a small diamond-section tube, 32 bytes per move on the GPU. One instanced draw call covers every visible layer: the layer limit is a vertex-attribute offset, since OpenGL ES 3.0 has no base instance. The tubes use the same lighting as the models. Colours follow the usual slicer convention: red outer wall, green inner walls, yellow top and bottom, orange infill, cyan support, teal skirt and brim. Layers below the selected one are a little darker. Travel moves are blue lines.
+- **Controls:**
+  - A layer slider over the view, with − and + buttons, showing layer, Z and "printed by" time from the engine's per-layer estimate.
+  - A Preview card to switch between models and toolpaths, turn each move type and travel on or off (with each type's share of the path), and show only the selected layer.
+  - The preview opens by itself after slicing. Any change to the scene or the profile clears it, as it clears the slice.
+- The slice card's print time and filament figures are the engine's estimates, as before.
+
 ## Mesh health (M5): floating parts and splitting
 
 - **Parts on import:** `MeshParts` finds a mesh's connected parts, meaning triangles joined through shared corners (corners are matched by exact coordinates, which is how exporters write shared vertices). It then rewrites the mesh with each part's triangles together, largest part first, recording each part's exact bounds and its own sample points.

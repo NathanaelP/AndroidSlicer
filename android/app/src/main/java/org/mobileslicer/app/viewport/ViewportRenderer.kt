@@ -5,6 +5,7 @@ import android.opengl.GLES30.*
 import android.opengl.GLSurfaceView
 import android.os.SystemClock
 import android.util.Log
+import org.mobileslicer.engine.GcodePreview
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -37,6 +38,18 @@ data class DrawItem(
     val outlineColor: FloatArray? = null,
 )
 
+/**
+ * Sliced toolpaths to draw in place of the models: layers [fromLayer] to
+ * [toLayer] of [data], with [visible] per MoveType and travel moves if [travel].
+ */
+class PreviewDraw(
+    val data: GcodePreview,
+    val fromLayer: Int,
+    val toLayer: Int,
+    val visible: BooleanArray,
+    val travel: Boolean,
+)
+
 /** Everything the renderer draws. Replaced as a whole from the UI thread. */
 data class SceneState(
     val camera: OrbitCamera,
@@ -45,6 +58,8 @@ data class SceneState(
     val bedHeight: Float,
     val items: List<DrawItem>,
     val background: FloatArray,
+    /** When set, the toolpaths are drawn instead of [items]. */
+    val preview: PreviewDraw? = null,
 )
 
 /** Frame statistics reported back to the UI. */
@@ -72,6 +87,12 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
     private var height = 1
     private var modelProgram = 0
     private var flatProgram = 0
+    private var pathProgram = 0
+    private var beadVbo = 0
+    // Toolpaths on the GPU, for the preview they came from.
+    private var pathFor: GcodePreview? = null
+    private var segVbo = 0
+    private var travelVbo = 0
     private var bedVbo = 0
     private var gridVbo = 0
     private var gridMinorCount = 0
@@ -95,6 +116,9 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         // A new context: everything on the GPU is gone.
         modelProgram = program(MODEL_VS, MODEL_FS)
         flatProgram = program(FLAT_VS, FLAT_FS)
+        pathProgram = program(PATH_VS, PATH_FS)
+        beadVbo = buffer(BEAD)
+        pathFor = null; segVbo = 0; travelVbo = 0
         bedVbo = 0; gridVbo = 0; volumeVbo = 0
         uploaded.clear(); geometryFor = null
         glEnable(GL_DEPTH_TEST)
@@ -132,8 +156,11 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         glUniform4f(uColor, 0.45f, 0.62f, 0.85f, 1f)
         drawArrays(volumeVbo, GL_LINES, 0, 24)
 
+        val preview = s.preview
+        if (preview != null) drawPreview(preview, viewProj, s.camera.view())
+
         // Models.
-        if (s.items.isNotEmpty()) {
+        if (preview == null && s.items.isNotEmpty()) {
             glUseProgram(modelProgram)
             val uMvp2 = glGetUniformLocation(modelProgram, "uMvp")
             val uModelView = glGetUniformLocation(modelProgram, "uModelView")
@@ -155,7 +182,7 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
             }
         }
         // Outlines (hole rims) over everything, so holes on the far side show too.
-        if (s.items.any { it.outlineColor != null }) {
+        if (preview == null && s.items.any { it.outlineColor != null }) {
             glUseProgram(flatProgram)
             glDisable(GL_DEPTH_TEST)
             glLineWidth(3f)
@@ -171,6 +198,70 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
             glEnable(GL_DEPTH_TEST)
         }
         reportFrame()
+    }
+
+    /** The sliced toolpaths: one instance of the bead template per extrusion move. */
+    private fun drawPreview(p: PreviewDraw, viewProj: FloatArray, view: FloatArray) {
+        val data = p.data
+        if (pathFor !== data) {
+            for (vbo in intArrayOf(segVbo, travelVbo)) if (vbo != 0) glDeleteBuffers(1, intArrayOf(vbo), 0)
+            segVbo = upload(data.segments)
+            travelVbo = upload(data.travels)
+            pathFor = data
+        }
+        if (data.layers.isEmpty()) return
+        val from = p.fromLayer.coerceIn(0, data.layers.lastIndex)
+        val to = p.toLayer.coerceIn(from, data.layers.lastIndex)
+        val first = data.layers[from].firstSegment
+        val count = data.layers[to].let { it.firstSegment + it.segmentCount } - first
+
+        if (count > 0 && segVbo != 0) {
+            glUseProgram(pathProgram)
+            glUniformMatrix4fv(glGetUniformLocation(pathProgram, "uMvp"), 1, false, viewProj, 0)
+            glUniformMatrix4fv(glGetUniformLocation(pathProgram, "uView"), 1, false, view, 0)
+            glUniform3fv(glGetUniformLocation(pathProgram, "uColors"), PATH_COLORS.size / 3, PATH_COLORS, 0)
+            glUniform1fv(glGetUniformLocation(pathProgram, "uVisible"), p.visible.size, FloatArray(p.visible.size) { if (p.visible[it]) 1f else 0f }, 0)
+            glUniform1f(glGetUniformLocation(pathProgram, "uTopZ"), data.layers[to].z)
+            glBindBuffer(GL_ARRAY_BUFFER, beadVbo)
+            glEnableVertexAttribArray(0)
+            glVertexAttribPointer(0, 3, GL_FLOAT, false, 12, 0)
+            glBindBuffer(GL_ARRAY_BUFFER, segVbo)
+            // Instance attributes start at the first visible layer's first move (ES 3.0 has no base instance).
+            val base = first * GcodePreview.SEGMENT_BYTES
+            glEnableVertexAttribArray(1)
+            glVertexAttribPointer(1, 4, GL_FLOAT, false, GcodePreview.SEGMENT_BYTES, base)
+            glVertexAttribDivisor(1, 1)
+            glEnableVertexAttribArray(2)
+            glVertexAttribPointer(2, 4, GL_FLOAT, false, GcodePreview.SEGMENT_BYTES, base + 16)
+            glVertexAttribDivisor(2, 1)
+            glDrawArraysInstanced(GL_TRIANGLES, 0, BEAD.size / 3, count)
+            glVertexAttribDivisor(1, 0); glVertexAttribDivisor(2, 0)
+            glDisableVertexAttribArray(1); glDisableVertexAttribArray(2); glDisableVertexAttribArray(0)
+            glBindBuffer(GL_ARRAY_BUFFER, 0)
+        }
+        if (p.travel && travelVbo != 0) {
+            val t0 = data.layers[from].firstTravel
+            val tn = data.layers[to].let { it.firstTravel + it.travelCount } - t0
+            glUseProgram(flatProgram)
+            glUniformMatrix4fv(glGetUniformLocation(flatProgram, "uMvp"), 1, false, viewProj, 0)
+            glUniform4f(glGetUniformLocation(flatProgram, "uColor"), TRAVEL_COLOR[0], TRAVEL_COLOR[1], TRAVEL_COLOR[2], 1f)
+            drawArrays(travelVbo, GL_LINES, 2 * t0, 2 * tn)
+        }
+    }
+
+    private fun upload(data: java.nio.ByteBuffer): Int {
+        if (data.limit() == 0) return 0
+        val ids = IntArray(1)
+        glGenBuffers(1, ids, 0)
+        glBindBuffer(GL_ARRAY_BUFFER, ids[0])
+        glBufferData(GL_ARRAY_BUFFER, data.limit(), data.duplicate().position(0), GL_STATIC_DRAW)
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        if (glGetError() == GL_OUT_OF_MEMORY) {
+            glDeleteBuffers(1, ids, 0)
+            lastError = "Not enough graphics memory for the preview"
+            return 0
+        }
+        return ids[0]
     }
 
     private fun drawArrays(vbo: Int, mode: Int, first: Int, count: Int) {
@@ -357,6 +448,80 @@ class ViewportRenderer(private val onStats: (RenderStats) -> Unit) : GLSurfaceVi
         const val BED_Z = -0.2f
 
         // Checked by tools/check_shaders.py with Khronos glslangValidator.
+        /**
+         * The bead template, one triangle list: a diamond cross-section (left edge,
+         * top ridge, right edge, bottom) swept along the move. Each corner is
+         * (along 0..1, across -1..1, up 0..1).
+         */
+        val BEAD: FloatArray = run {
+            val ring = listOf(-1f to 0.5f, 0f to 1f, 1f to 0.5f, 0f to 0f)
+            val out = ArrayList<Float>()
+            for (i in ring.indices) {
+                val (a, ah) = ring[i]; val (b, bh) = ring[(i + 1) % ring.size]
+                val q = listOf(floatArrayOf(0f, a, ah), floatArrayOf(1f, a, ah), floatArrayOf(1f, b, bh), floatArrayOf(0f, b, bh))
+                for (k in intArrayOf(0, 1, 2, 0, 2, 3)) out += q[k].toList()
+            }
+            out.toFloatArray()
+        }
+
+        /** Colours per MoveType, in its order; the usual slicer colours. */
+        val PATH_COLORS = floatArrayOf(
+            0.90f, 0.27f, 0.22f,  // outer wall: red
+            0.30f, 0.78f, 0.35f,  // inner walls: green
+            0.95f, 0.84f, 0.30f,  // top and bottom: yellow
+            0.95f, 0.55f, 0.20f,  // infill: orange
+            0.30f, 0.80f, 0.88f,  // support: cyan
+            0.40f, 0.72f, 0.66f,  // skirt and brim: teal
+            0.72f, 0.72f, 0.78f,  // prime tower: grey
+            0.60f, 0.60f, 0.60f,  // other
+        )
+        val TRAVEL_COLOR = floatArrayOf(0.35f, 0.50f, 0.98f)
+
+        const val PATH_VS = """#version 300 es
+uniform mat4 uMvp;
+uniform mat4 uView;
+uniform vec3 uColors[8];
+uniform float uVisible[8];
+uniform float uTopZ;
+layout(location = 0) in vec3 aCorner;  // along, across, up
+layout(location = 1) in vec4 aEnds;    // x0, y0, x1, y1
+layout(location = 2) in vec4 aInfo;    // z (top), layer height, width, type
+out highp vec3 vViewPos;
+out vec3 vColor;
+void main() {
+    int t = int(aInfo.w + 0.5);
+    if (uVisible[t] < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vViewPos = vec3(0.0); vColor = vec3(0.0); return; }
+    vec2 d = aEnds.zw - aEnds.xy;
+    float len = length(d);
+    vec2 dir = len > 1e-6 ? d / len : vec2(1.0, 0.0);
+    vec2 across = vec2(-dir.y, dir.x);
+    float halfW = 0.5 * aInfo.z;
+    // Lengthen by half a width at both ends so corners join up.
+    vec2 xy = mix(aEnds.xy - dir * halfW, aEnds.zw + dir * halfW, aCorner.x) + across * (aCorner.y * halfW);
+    float z = aInfo.x - aInfo.y + aCorner.z * aInfo.y;
+    vec4 p = vec4(xy, z, 1.0);
+    vViewPos = (uView * p).xyz;
+    // Layers below the one being looked at are a little darker.
+    vColor = uColors[t] * (aInfo.x < uTopZ - 1e-3 ? 0.78 : 1.0);
+    gl_Position = uMvp * p;
+}
+"""
+
+        const val PATH_FS = """#version 300 es
+precision highp float;
+in highp vec3 vViewPos;
+in vec3 vColor;
+out vec4 fragColor;
+void main() {
+    vec3 n = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
+    vec3 toEye = normalize(-vViewPos);
+    if (dot(n, toEye) < 0.0) n = -n;
+    vec3 key = normalize(vec3(-0.5, 0.75, 0.45));
+    float light = 0.30 + 0.25 * dot(n, toEye) + 0.50 * max(dot(n, key), 0.0);
+    fragColor = vec4(vColor * light, 1.0);
+}
+"""
+
         const val MODEL_VS = """#version 300 es
 uniform mat4 uMvp;
 uniform mat4 uModelView;

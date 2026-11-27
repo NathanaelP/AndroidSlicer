@@ -12,8 +12,8 @@ android {
         applicationId = "org.mobileslicer.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.5.3-m5"
+        versionCode = 12
+        versionName = "0.6.1-m6"
         ndk { abiFilters += "arm64-v8a" }
     }
 
