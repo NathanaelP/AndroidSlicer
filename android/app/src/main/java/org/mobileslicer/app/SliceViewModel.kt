@@ -29,6 +29,8 @@ import org.mobileslicer.engine.MeshRepair
 import org.mobileslicer.engine.MeshSimplifier
 import org.mobileslicer.engine.EngineException
 import org.mobileslicer.engine.EngineRunner
+import org.mobileslicer.engine.GcodePreview
+import org.mobileslicer.engine.MoveType
 import org.mobileslicer.engine.MeshImporter
 import org.mobileslicer.engine.Profile
 import org.mobileslicer.engine.SliceResult
@@ -61,6 +63,16 @@ data class UiState(
     val profileId: String = "",
     val slice: SliceState = SliceState.Idle,
     val message: String? = null,
+    /** Toolpaths of the last slice, read from its G-code; null until read, or after any change. */
+    val preview: GcodePreview? = null,
+    /** Showing the toolpaths instead of the models. */
+    val showPreview: Boolean = false,
+    /** Highest layer shown (index into preview.layers). */
+    val previewLayer: Int = 0,
+    /** Show only that layer, not everything below it too. */
+    val previewSingleLayer: Boolean = false,
+    val previewHidden: Set<MoveType> = emptySet(),
+    val previewTravel: Boolean = false,
 )
 
 class SliceViewModel(app: Application) : AndroidViewModel(app) {
@@ -98,7 +110,7 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
         return 2f * brim + 4f
     }
 
-    fun selectProfile(id: String) = _state.update { it.copy(profileId = id, slice = SliceState.Idle) }
+    fun selectProfile(id: String) = _state.update { it.copy(profileId = id, slice = SliceState.Idle, preview = null, showPreview = false) }
 
     /** Objects outside the build volume. */
     fun outOfBounds(s: UiState = _state.value): List<SceneObject> = volume(s).let { v -> s.scene.objects.filter { !it.fits(v) } }
@@ -111,7 +123,7 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
             val next = change(s.scene)
             if (next == s.scene) return@update s
             history.record(s.scene, mergeKey)
-            withFields(s.copy(scene = next, slice = SliceState.Idle, canUndo = history.canUndo, canRedo = history.canRedo))
+            withFields(s.copy(scene = next, slice = SliceState.Idle, preview = null, showPreview = false, canUndo = history.canUndo, canRedo = history.canRedo))
         }
     }
 
@@ -126,12 +138,12 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
 
     fun undo() = _state.update { s ->
         val prev = history.undo(s.scene) ?: return@update s
-        withFields(s.copy(scene = prev, slice = SliceState.Idle, layFlatMode = false, canUndo = history.canUndo, canRedo = history.canRedo))
+        withFields(s.copy(scene = prev, slice = SliceState.Idle, preview = null, showPreview = false, layFlatMode = false, canUndo = history.canUndo, canRedo = history.canRedo))
     }
 
     fun redo() = _state.update { s ->
         val next = history.redo(s.scene) ?: return@update s
-        withFields(s.copy(scene = next, slice = SliceState.Idle, layFlatMode = false, canUndo = history.canUndo, canRedo = history.canRedo))
+        withFields(s.copy(scene = next, slice = SliceState.Idle, preview = null, showPreview = false, layFlatMode = false, canUndo = history.canUndo, canRedo = history.canRedo))
     }
 
     fun select(id: Long?) = _state.update { s ->
@@ -427,6 +439,7 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(slice = SliceState.Running(done, stages.size, stages.getOrNull(done))) }
                 }
                 _state.update { it.copy(slice = SliceState.Done(result)) }
+                loadPreview(result.gcode)
             } catch (e: CancellationException) {
                 _state.update { it.copy(slice = SliceState.Idle) }
                 throw e
@@ -437,6 +450,44 @@ class SliceViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** Reads the toolpaths for the preview, off the main thread, and shows them. */
+    private suspend fun loadPreview(gcode: File) {
+        val d = filamentDiameter()
+        val p = try {
+            withContext(Dispatchers.IO) { GcodePreview.read(gcode, d) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _state.update { it.copy(message = "Couldn't read the toolpaths for the preview: ${e.message}") }
+            return
+        } catch (e: OutOfMemoryError) {
+            _state.update { it.copy(message = "This job is too large to preview on this device.") }
+            return
+        }
+        _state.update {
+            // Only if nothing changed while reading.
+            if ((it.slice as? SliceState.Done)?.result?.gcode != gcode) it
+            else it.copy(preview = p, showPreview = true, previewLayer = p.layers.lastIndex.coerceAtLeast(0), previewSingleLayer = false)
+        }
+    }
+
+    fun setShowPreview(on: Boolean) = _state.update { it.copy(showPreview = on && it.preview != null, layFlatMode = false) }
+
+    fun setPreviewLayer(layer: Int) = _state.update { s ->
+        val last = s.preview?.layers?.lastIndex ?: return@update s
+        s.copy(previewLayer = layer.coerceIn(0, maxOf(last, 0)))
+    }
+
+    fun stepPreviewLayer(delta: Int) = setPreviewLayer(_state.value.previewLayer + delta)
+
+    fun setPreviewSingleLayer(on: Boolean) = _state.update { it.copy(previewSingleLayer = on) }
+
+    fun togglePreviewType(t: MoveType) = _state.update {
+        it.copy(previewHidden = if (t in it.previewHidden) it.previewHidden - t else it.previewHidden + t)
+    }
+
+    fun setPreviewTravel(on: Boolean) = _state.update { it.copy(previewTravel = on) }
 
     fun cancelSlice() {
         sliceJob?.cancel()

@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -68,6 +69,10 @@ fun Viewport(
     onMoveEnd: () -> Unit,
     onFaceTap: (id: Long, ray: Ray) -> Unit,
     modifier: Modifier = Modifier,
+    /** Toolpaths to show instead of the objects; objects can't be moved meanwhile. */
+    preview: PreviewDraw? = null,
+    /** Drawn over the bottom of the view, such as the layer slider. */
+    overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     var camera by remember { mutableStateOf(OrbitCamera.overview(volume.width, volume.depth, volume.height)) }
     var stats by remember { mutableStateOf<RenderStats?>(null) }
@@ -82,6 +87,7 @@ fun Viewport(
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnMoveEnd by rememberUpdatedState(onMoveEnd)
     val currentOnFaceTap by rememberUpdatedState(onFaceTap)
+    val currentPreview by rememberUpdatedState(preview)
 
     fun frameAll(): OrbitCamera {
         val objs = currentObjects
@@ -148,6 +154,7 @@ fun Viewport(
                         DrawItem(o.mesh.stl.path, o.modelMatrix(), segments, if (o.mesh.health.holes.isNotEmpty()) HOLE else null)
                     },
                     background = BACKGROUND,
+                    preview = preview,
                 )
                 view.requestRender()
             },
@@ -163,7 +170,8 @@ fun Viewport(
                     val h = size.height.toFloat().coerceAtLeast(1f)
                     val start = down.position
                     val downRay = screenRay(camera, w, h, start.x, start.y)
-                    val hit = pickObject(downRay, currentObjects)
+                    // In the preview, objects can't be picked: every gesture moves the camera.
+                    val hit = if (currentPreview != null) null else pickObject(downRay, currentObjects)
                     // Dragging an object moves it in the horizontal plane through the grabbed point.
                     val grabZ = hit?.let { o -> rayBox(downRay, o.bounds)?.let { downRay.at(it).z } }
                     var lastPlanePoint = grabZ?.let { rayPlaneZ(downRay, it) }
@@ -222,7 +230,7 @@ fun Viewport(
                             hit != null && currentLayFlat -> currentOnFaceTap(hit.id, downRay)
                             hit != null -> currentOnSelect(hit.id)
                             else -> {
-                                currentOnSelect(null)
+                                if (currentPreview == null) currentOnSelect(null)
                                 // Two quick taps on empty space frame everything.
                                 val now = System.currentTimeMillis()
                                 if (now - lastTapUp < 350) { camera = frameAll(); lastTapUp = 0 } else lastTapUp = now
@@ -245,7 +253,8 @@ fun Viewport(
                     .background(Color(0xCC2B5DA8), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
-        Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
+        overlay()
+        if (preview == null) Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
             val s = stats
             when {
                 objects.isEmpty() -> Text("Open a model to see it here.", color = Color(0xFFB8BCC6), style = MaterialTheme.typography.bodyMedium)

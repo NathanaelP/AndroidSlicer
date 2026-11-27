@@ -69,7 +69,7 @@ def sphere(r, lat=96, lon=192) -> list:
 PAGE = """<!doctype html><html><body style="margin:0;background:#000">
 <canvas id="c" width="1200" height="800"></canvas>
 <script>
-const S = %(shaders)s, scene = %(scene)s, meshB64 = %(mesh)s;
+const S = %(shaders)s, scene = %(scene)s, meshB64 = %(mesh)s, pathB64 = %(paths)s;
 const gl = document.getElementById('c').getContext('webgl2', {antialias: true});
 function prog(vs, fs) {
   const mk = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
@@ -124,6 +124,34 @@ try {
       draw(b, gl.TRIANGLES, first * 3, count * 3);
     }
   }
+  // Toolpaths, as ViewportRenderer.drawPreview draws them.
+  if (scene.preview) {
+    const pv = scene.preview;
+    const bytes = (b64) => { const u = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)); return u; };
+    const path = prog(S.PATH_VS, S.PATH_FS);
+    gl.bindAttribLocation(path, 0, 'aCorner');
+    gl.useProgram(path);
+    gl.uniformMatrix4fv(gl.getUniformLocation(path, 'uMvp'), false, vp);
+    gl.uniformMatrix4fv(gl.getUniformLocation(path, 'uView'), false, new Float32Array(scene.view));
+    gl.uniform3fv(gl.getUniformLocation(path, 'uColors'), new Float32Array(pv.colors));
+    gl.uniform1fv(gl.getUniformLocation(path, 'uVisible'), new Float32Array(pv.visible));
+    gl.uniform1f(gl.getUniformLocation(path, 'uTopZ'), pv.topZ);
+    const bead = buf(new Float32Array(pv.bead));
+    gl.bindBuffer(gl.ARRAY_BUFFER, bead); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0);
+    const seg = buf(bytes(pathB64.segments));
+    const base = pv.first * 32;
+    gl.bindBuffer(gl.ARRAY_BUFFER, seg);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, base); gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, base + 16); gl.vertexAttribDivisor(2, 1);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, pv.bead.length / 3, pv.count);
+    gl.vertexAttribDivisor(1, 0); gl.vertexAttribDivisor(2, 0); gl.disableVertexAttribArray(1); gl.disableVertexAttribArray(2);
+    if (pv.travelCount > 0) {
+      gl.useProgram(flat);
+      gl.uniformMatrix4fv(uMvp, false, vp);
+      gl.uniform4f(uColor, pv.travelColor[0], pv.travelColor[1], pv.travelColor[2], 1);
+      draw(buf(bytes(pathB64.travels)), gl.LINES, 2 * pv.travelFirst, 2 * pv.travelCount);
+    }
+  }
   // Hole outlines over everything, as ViewportRenderer draws them.
   gl.useProgram(flat); gl.disable(gl.DEPTH_TEST); gl.lineWidth(3);
   for (const it of lineItems) {
@@ -163,7 +191,11 @@ def main() -> int:
             html = Path(tmp) / f"{sc['name']}.html"
             used = {it["mesh"] for it in sc["items"]}
             mesh = json.dumps({path: tris_to_b64(stl_positions(path)) for path in used})
-            html.write_text(PAGE % {"shaders": json.dumps(shaders()), "scene": json.dumps(sc), "mesh": mesh})
+            paths = {}
+            if "preview" in sc:
+                for k in ("segments", "travels"):
+                    paths[k] = base64.b64encode(Path(sc["preview"][k]).read_bytes()).decode()
+            html.write_text(PAGE % {"shaders": json.dumps(shaders()), "scene": json.dumps(sc), "mesh": mesh, "paths": json.dumps(paths)})
             jobs.append([str(html), str(out / f"{sc['name']}.png")])
         js = Path(tmp) / "render.js"
         js.write_text(NODE)

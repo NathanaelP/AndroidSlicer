@@ -6,6 +6,8 @@ import org.mobileslicer.app.scene.BuildVolume
 import org.mobileslicer.app.scene.SceneObject
 import org.mobileslicer.app.scene.arrange
 import org.mobileslicer.engine.Bounds
+import org.mobileslicer.engine.GcodePreview
+import org.mobileslicer.engine.MoveType
 import org.mobileslicer.engine.MeshImporter
 import org.mobileslicer.engine.MeshInfo
 import org.mobileslicer.engine.Transform
@@ -59,7 +61,13 @@ class ViewportScenesTest {
         }
 
         data class Item(val o: SceneObject, val color: String)
-        data class Scene(val name: String, val camera: OrbitCamera, val items: List<Item>)
+        data class Preview(val from: Int, val to: Int, val travel: Boolean, val hide: Set<MoveType> = emptySet())
+        data class Scene(val name: String, val camera: OrbitCamera, val items: List<Item>, val preview: Preview? = null)
+        // The sliced 20 mm cube (desktop engine, Normal profile), centred on the bed.
+        val gcode = GcodePreview.read(File("../engine/src/test/resources/cube20-normal.gcode"), 1.75f)
+        File("build/preview-segments.bin").writeBytes(ByteArray(gcode.segments.limit()).also { gcode.segments.duplicate().get(it) })
+        File("build/preview-travels.bin").writeBytes(ByteArray(gcode.travels.limit()).also { gcode.travels.duplicate().get(it) })
+        val cubeOnBed = Bounds(107.5f, 105f, 0f, 127.5f, 125f, 20f)
         val scenes = listOf(
             Scene("empty-bed", overview, emptyList()),
             Scene("cube-close", OrbitCamera.framing(obj(1, cube).bounds, yaw = -1.1f, pitch = 0.45f), listOf(Item(obj(1, cube), "amber"))),
@@ -76,6 +84,10 @@ class ViewportScenesTest {
             Scene("floating-part-selected", OrbitCamera.framing(obj(1, loose).bounds, yaw = -1.1f, pitch = 0.35f), listOf(Item(obj(1, loose), "selected"))),
             Scene("hole-outline", OrbitCamera.framing(obj(1, open).bounds, yaw = -2.3f, pitch = 0.45f), listOf(Item(obj(1, open), "amber"))),
             Scene("hole-outline-behind", OrbitCamera.framing(obj(1, open).bounds, yaw = 0.8f, pitch = 0.45f), listOf(Item(obj(1, open), "selected"))),
+            Scene("preview-all", OrbitCamera.framing(cubeOnBed, yaw = -1.1f, pitch = 0.5f), emptyList(), Preview(0, gcode.layers.lastIndex, false)),
+            Scene("preview-layer-40", OrbitCamera.framing(cubeOnBed, yaw = -1.1f, pitch = 0.75f), emptyList(), Preview(0, 40, true)),
+            Scene("preview-walls-only", OrbitCamera.framing(cubeOnBed, yaw = -1.1f, pitch = 0.5f), emptyList(),
+                Preview(0, 60, false, setOf(MoveType.FILL, MoveType.SKIN))),
             Scene("cube-lowest-view", OrbitCamera.framing(obj(1, cube).bounds, yaw = -1.1f, pitch = 0.45f).orbit(0f, -100000f, 800f),
                 listOf(Item(obj(1, cube), "amber"))),
         )
@@ -90,7 +102,16 @@ class ViewportScenesTest {
                 }.joinToString(",", "[", "]")
                 """{"mesh":"${o.mesh.stl.absolutePath}","model":${arr(o.modelMatrix())},"segments":$segs,"lines":${arr(holeOutlines(o.mesh))}}"""
             }
-            """  {"name":"${s.name}","bed":[${v.width},${v.depth},${v.height}],"viewProj":${arr(viewProj)},"view":${arr(s.camera.view())},"items":$items}"""
+            val pv = s.preview?.let { p ->
+                val l = gcode.layers
+                val first = l[p.from].firstSegment; val count = l[p.to].firstSegment + l[p.to].segmentCount - first
+                val t0 = l[p.from].firstTravel; val tn = l[p.to].firstTravel + l[p.to].travelCount - t0
+                val visible = MoveType.entries.joinToString(",", "[", "]") { if (it in p.hide) "0" else "1" }
+                ""","preview":{"segments":"${File("build/preview-segments.bin").absolutePath}","travels":"${File("build/preview-travels.bin").absolutePath}",""" +
+                    """"first":$first,"count":$count,"travelFirst":$t0,"travelCount":${if (p.travel) tn else 0},"topZ":${l[p.to].z},"visible":$visible,""" +
+                    """"bead":${arr(ViewportRenderer.BEAD)},"colors":${arr(ViewportRenderer.PATH_COLORS)},"travelColor":${arr(ViewportRenderer.TRAVEL_COLOR)}}"""
+            } ?: ""
+            """  {"name":"${s.name}","bed":[${v.width},${v.depth},${v.height}],"viewProj":${arr(viewProj)},"view":${arr(s.camera.view())},"items":$items$pv}"""
         }
         File("build").mkdirs()
         File("build/viewport-scenes.json").writeText(json)
